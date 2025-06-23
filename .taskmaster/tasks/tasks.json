@@ -1,0 +1,264 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Setup Project and Environment",
+        "description": "Initialize the project repository, set up a virtual environment, and install necessary Python libraries.",
+        "details": "Create a new directory for the project. Initialize a git repository. Create a Python virtual environment using `python -m venv .venv`. Activate the environment (`source .venv/bin/activate` on Linux/macOS, `.venv\\Scripts\\activate` on Windows). Install core dependencies using pip: `pip install pydub moviepy opencv-python`. Ensure FFmpeg is installed on the target system, as it is required by both PyDub and MoviePy. Provide instructions for installing FFmpeg on common operating systems (e.g., `sudo apt-get install ffmpeg` for Debian/Ubuntu, `brew install ffmpeg` for macOS, download binaries for Windows).",
+        "testStrategy": "Verify that the virtual environment is created and activated successfully. Confirm that all specified libraries (pydub, moviepy, opencv-python) are installed and can be imported in a Python script. Check for the presence and accessibility of the FFmpeg executable in the system's PATH or a known location.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Implement JSON Input Parsing and Validation",
+        "description": "Define the structure for the input JSON file and implement parsing and validation logic.",
+        "details": "Define a clear JSON schema. A possible structure: `{\"images\": [{\"path\": \"path/to/image1.jpg\"}, {\"path\": \"path/to/image2.png\"}], \"voice_over\": \"path/to/voice_over.mp3\", \"background_music\": \"path/to/bg_music.wav\"}`. Implement a Python function to load the JSON file using the `json` module. Add validation checks: ensure required keys (`images`, `voice_over`, `background_music`) exist, `images` is a list, each image object has a `path`, and the paths are strings. Use `os.path.exists()` to verify that all specified file paths (images, voice-over, background music) exist and are accessible. Raise specific errors for invalid structure or missing files.",
+        "testStrategy": "Create test JSON files: one valid, one with missing keys, one with incorrect data types, one with non-existent file paths. Run the parsing function with each file and assert that it correctly parses the valid file and raises appropriate errors for invalid files. Verify that file existence checks function correctly.",
+        "priority": "high",
+        "dependencies": [1],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Implement Audio Processing with PyDub",
+        "description": "Implement the logic to load, mix, and process audio files (voice-over and background music) using PyDub.",
+        "details": "Create a function that takes the paths to the voice-over and background music files from the parsed JSON. Use `pydub.AudioSegment.from_file()` to load each audio file, handling potential format differences (mp3, wav). Mix the voice-over and background music. A common approach is to overlay the voice-over on the background music, potentially reducing the background music volume when the voice-over is present. Use `audio_segment.overlay()` and `audio_segment.apply_gain()`. The total duration of the final mixed audio will determine the video length, as per the PRD. Return the combined `AudioSegment` object.",
+        "testStrategy": "Prepare test audio files in different formats (mp3, wav). Test loading each format individually. Test mixing voice-over and background music, verifying the output audio contains both tracks. Test volume adjustments. Verify the duration of the resulting mixed audio segment is correct (should match the voice-over duration if background music is shorter, or the longer of the two if mixed differently, but the PRD implies voice-over drives timing). Listen to the output audio to confirm quality and mixing.",
+        "priority": "high",
+        "dependencies": [2],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Audio Format Handling",
+            "description": "Develop modules to read and decode various audio formats (e.g., MP3, WAV) into a common raw audio format for processing. Include error handling for unsupported formats.",
+            "dependencies": [],
+            "details": "Requires integration with libraries like FFmpeg. Focus on decoding input files.",
+            "status": "done"
+          },
+          {
+            "id": 2,
+            "title": "Develop Volume Control Logic",
+            "description": "Create functions to adjust the volume of individual audio streams or segments. This should operate on the raw audio data obtained after format handling.",
+            "dependencies": [1],
+            "details": "Implement gain adjustment algorithms. Ensure handling of different audio sample types (e.g., float, int16).",
+            "status": "done"
+          },
+          {
+            "id": 3,
+            "title": "Implement Audio Mixing Logic",
+            "description": "Develop the core logic for combining multiple audio streams into a single output stream. This should utilize the volume control functions and handle potential sample rate/channel differences.",
+            "dependencies": [1, 2],
+            "details": "Focus on sample-level mixing algorithms. Consider techniques for handling clipping or distortion.",
+            "status": "done"
+          },
+          {
+            "id": 4,
+            "title": "Integrate Duration Management",
+            "description": "Add functionality to manage the duration of the output audio, including trimming, padding, or looping streams during mixing to meet a target duration or synchronize multiple inputs.",
+            "dependencies": [1, 3],
+            "details": "Requires tracking stream positions and lengths. Implement logic for stream synchronization and output length control.",
+            "status": "done"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Implement Image Processing with OpenCV",
+        "description": "Implement the logic to load and resize image files using OpenCV.",
+        "details": "Create a function that takes a list of image paths from the parsed JSON. Iterate through the list. For each image path, use `cv2.imread()` to load the image. Define a standard output resolution (e.g., 1920x1080 or 1280x720) for all images. Calculate the aspect ratio of the original image and the target resolution. Resize the image using `cv2.resize()`. To maintain the aspect ratio and avoid stretching, implement padding (e.g., using `cv2.copyMakeBorder`) to fill the extra space with a solid color (like black) if the original aspect ratio doesn't match the target resolution. Store the processed images (e.g., as NumPy arrays or save them temporarily).",
+        "testStrategy": "Prepare test images with different formats (jpg, png) and various resolutions and aspect ratios (e.g., 4:3, 16:9, portrait). Process each image. Verify that the output images are resized to the standard resolution. Visually inspect the output images to confirm that aspect ratios are maintained correctly through padding and that no distortion occurs.",
+        "priority": "high",
+        "dependencies": [2],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 5,
+        "title": "Implement Raw Video Creation from Images with MoviePy",
+        "description": "Create a raw video clip from the processed images using MoviePy, determining image display durations based on the total audio length.",
+        "details": "Get the total duration of the processed audio from Task 3. Get the list of processed images (or their paths/data) from Task 4. Calculate the duration each image should be displayed: `duration_per_image = total_audio_duration_seconds / number_of_images`. Use `moviepy.editor.ImageSequenceClip()` to create a video clip from the sequence of processed images. Pass the list of image data/paths and specify the `durations` parameter as a list where each element is `duration_per_image`. Set a suitable frame rate (e.g., 24 or 30 fps) for the clip. Return the MoviePy video clip object.",
+        "testStrategy": "Use processed images and audio from previous tasks. Create a raw video clip. Verify the total duration of the created video clip matches the total audio duration. Check the number of frames generated per image duration based on the chosen FPS. If possible, preview the raw video clip to ensure images transition correctly after their calculated duration.",
+        "priority": "high",
+        "dependencies": [3, 4],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Implement Audio-Video Merging with MoviePy",
+        "description": "Merge the processed audio track with the raw video clip using MoviePy.",
+        "details": "Take the raw video clip object from Task 5 and the processed audio segment object from Task 3. Use the `video_clip.set_audio(audio_clip)` method provided by MoviePy to attach the audio track to the video clip. Ensure that the duration of the audio clip matches the duration of the video clip (which should already be the case if Task 5 was done correctly based on audio duration). Return the final video clip object with the audio track attached.",
+        "testStrategy": "Take the raw video and processed audio. Perform the merging step. Verify that the resulting MoviePy clip object has both a video track and an audio track. Check that the duration of the merged clip is correct and matches the original audio duration. A simple check like `hasattr(merged_clip, 'audio')` and verifying duration metadata should suffice.",
+        "priority": "high",
+        "dependencies": [3, 5],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Implement Final Video Export with MoviePy",
+        "description": "Export the final video clip with merged audio to an MP4 file using MoviePy.",
+        "details": "Take the merged video clip object from Task 6. Use the `merged_clip.write_videofile()` method to export the video. Specify the output file path (e.g., `output.mp4`). Set the `codec` parameter to `'libx264'` for standard MP4 video encoding. Set the `audio_codec` parameter to `'aac'`. Specify the `fps` parameter (should match the FPS used in Task 5). Ensure that FFmpeg is correctly configured and accessible by MoviePy for this step to succeed. Handle potential errors during the export process.",
+        "testStrategy": "Use a merged video clip. Call the export function, specifying an output path. Verify that an MP4 file is created at the specified location. Check the file size is non-zero. Use a media player or a tool like FFprobe to verify that the output file is a valid MP4 container, contains both video (H.264 codec) and audio (AAC codec) streams, and has the correct resolution and duration.",
+        "priority": "high",
+        "dependencies": [6],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Create Main Orchestration Script",
+        "description": "Create the main Python script that orchestrates the entire video creation pipeline from JSON input to MP4 output.",
+        "details": "Create a main script file (e.g., `create_video.py`). Implement a main function that takes the path to the input JSON file and the desired output video path as arguments (e.g., using `argparse`). Inside the main function, call the functions implemented in Tasks 2 through 7 in the correct sequence: parse JSON, process audio, process images, create raw video, merge audio, export final video. Add print statements or basic logging to indicate the progress of each step.",
+        "testStrategy": "Run the main script from the command line with a valid input JSON file path and an output path. Verify that the script executes without errors and produces the final MP4 video file. Test with different valid JSON inputs to ensure consistency. Test edge cases like a JSON with only one image.",
+        "priority": "high",
+        "dependencies": [2, 3, 4, 5, 6, 7],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Implement Video Concatenation and Transitions",
+        "description": "Implement the core logic to concatenate a list of video files and insert transition effects between them.",
+        "details": "Create a new module or function that accepts a list of video file paths and a list of transition specifications (type, duration) as input. Utilize a library like MoviePy or FFmpeg (via subprocess) to load each video clip. Concatenate the clips sequentially. Implement logic to insert transition effects (e.g., fade, crossfade) between the concatenated clips. The transition parameters should be read from the input specification. Handle potential inconsistencies in input video properties (resolution, frame rate) by standardizing them if necessary (initially, assume consistent inputs for simplicity). The function should return a single MoviePy video clip object representing the merged video with transitions.",
+        "testStrategy": "Prepare a set of short test video files with consistent properties. Create test input data structures (e.g., Python dictionaries simulating parsed JSON) specifying different sequences of videos and various transition types/durations. Write unit tests that call the video merging function with these inputs. Verify the duration of the output video clip. Visually inspect the generated video clips to confirm correct concatenation and proper application of transition effects. Test edge cases such as merging only two videos, merging multiple videos, and using different transition types.",
+        "status": "done",
+        "dependencies": [2],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set up Environment and Verify Dependencies",
+            "description": "Install MoviePy and ensure FFmpeg is accessible and correctly configured for video processing.",
+            "dependencies": [],
+            "details": "Install MoviePy via pip. Verify FFmpeg installation and path. Write a simple script to import MoviePy and check FFmpeg path.",
+            "status": "done",
+            "testStrategy": ""
+          },
+          {
+            "id": 2,
+            "title": "Implement Basic Video Concatenation",
+            "description": "Write code to concatenate a list of video files without any transitions.",
+            "dependencies": [1],
+            "details": "Use `moviepy.editor.concatenate_videoclips` to join video files. Handle potential issues like differing resolutions or frame rates by resizing/re-sampling if necessary (or note this as a limitation for now).\n<info added on 2025-06-23T02:11:11.540Z>\nBổ sung yêu cầu bắt buộc: Trước khi nối, chuẩn hóa tất cả video đầu vào về cùng độ phân giải (ví dụ 1280x720) và tốc độ khung hình (ví dụ 24 hoặc 30 fps) sử dụng các phương thức resize và set_fps của MoviePy. Chỉ nối các video sau khi đã chuẩn hóa thành công. Nếu quá trình chuẩn hóa thất bại cho bất kỳ video nào, phải báo lỗi.\n</info added on 2025-06-23T02:11:11.540Z>",
+            "status": "done",
+            "testStrategy": ""
+          },
+          {
+            "id": 3,
+            "title": "Add Fade and Crossfade Transitions",
+            "description": "Implement support for adding fade-in/fade-out and crossfade transitions between concatenated clips.",
+            "dependencies": [2],
+            "details": "Modify the concatenation logic to insert transition clips (e.g., using `crossfadein`, `fadein`, `fadeout`) between the main video clips. Define parameters like transition duration.",
+            "status": "done",
+            "testStrategy": ""
+          },
+          {
+            "id": 4,
+            "title": "Extend Transition Types and Sequence Handling",
+            "description": "Add support for additional transition types (if applicable via MoviePy or custom logic) and handle sequences of multiple transitions between several clips.",
+            "dependencies": [3],
+            "details": "Explore other MoviePy transition effects or implement custom ones. Develop a mechanism to apply transitions programmatically based on a list of clips and desired transitions/durations. Consider how to handle transitions at the beginning/end. Address potential edge cases related to different clip properties during transitions.",
+            "status": "done",
+            "testStrategy": ""
+          },
+          {
+            "id": 5,
+            "title": "Implement Automated Tests",
+            "description": "Write automated tests to verify the correctness of basic concatenation and transition application.",
+            "dependencies": [4],
+            "details": "Create test cases with sample video files. Test basic concatenation output length and content. Test fade/crossfade transitions visually or by analyzing frame data at transition points. Test sequences of transitions. Use a testing framework like `unittest` or `pytest`.",
+            "status": "done",
+            "testStrategy": ""
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Add URL input support for media files",
+        "description": "Modify API scripts to accept HTTP/HTTPS URLs for media inputs, download files locally, and use local paths in the processing pipeline.",
+        "details": "Implement logic within `create_video.py` and potentially `concat_videos.py` to detect if input paths for images, audio, or video segments are URLs. If a URL is detected, use a library like `requests` to download the file to a temporary directory on the server. Replace the URL in the input data structure with the temporary local file path before passing it to the core processing functions (Tasks 3-7, 9). Implement robust error handling for download failures (network issues, invalid URLs, non-existent resources). Add basic validation post-download (e.g., check file size, attempt to infer file type). Ensure temporary files are stored in a dedicated, secure temporary location and implement cleanup mechanisms (e.g., using `tempfile` module, `atexit`, or `try...finally` blocks) to remove these files after processing is complete, regardless of success or failure.",
+        "testStrategy": "Prepare test JSON inputs for `create_video.py` containing various combinations of local file paths and HTTP/HTTPS URLs for images, audio, and video segments. Include test cases with invalid or non-existent URLs to verify error handling. Run the script with these test inputs and verify that files are correctly downloaded, the video is generated successfully using the downloaded content, and temporary files are properly cleaned up afterwards. Test `concat_videos.py` directly with a list of URLs if its input parsing is modified. Verify output video integrity and temporary file cleanup in all test scenarios.",
+        "status": "done",
+        "dependencies": [8, 9],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Detect URLs in input",
+            "description": "Implement logic to check if any media input path is an HTTP/HTTPS URL.",
+            "dependencies": [],
+            "details": "Check all input fields for images, audio, or video for URL patterns.",
+            "status": "done",
+            "testStrategy": "Unit test with JSON containing both local paths and URLs."
+          },
+          {
+            "id": 2,
+            "title": "Download files from URLs",
+            "description": "Download media files from detected URLs to a temporary directory.",
+            "dependencies": [1],
+            "details": "Use requests or httpx to download files. Save to a secure temp folder.",
+            "status": "done",
+            "testStrategy": "Test with valid and invalid URLs, check file existence after download."
+          },
+          {
+            "id": 3,
+            "title": "Replace URL with local path",
+            "description": "Update input data to use the downloaded file path instead of the original URL.",
+            "dependencies": [2],
+            "details": "Modify the input structure in memory before passing to processing pipeline.",
+            "status": "done",
+            "testStrategy": "Check that all URLs are replaced with valid local paths before processing."
+          },
+          {
+            "id": 4,
+            "title": "Validate downloaded file type and size",
+            "description": "Check that downloaded files are of expected type and within size limits.",
+            "dependencies": [2],
+            "details": "Use file signature or extension checks, and enforce max file size.",
+            "status": "done",
+            "testStrategy": "Test with valid, invalid, and oversized files."
+          },
+          {
+            "id": 5,
+            "title": "Handle download errors",
+            "description": "Implement error handling for failed downloads or invalid URLs.",
+            "dependencies": [2],
+            "details": "Gracefully handle network errors, timeouts, and invalid resources.",
+            "status": "done",
+            "testStrategy": "Test with unreachable URLs and simulate network failures."
+          },
+          {
+            "id": 6,
+            "title": "Clean up temporary files",
+            "description": "Ensure all temporary files are deleted after processing, even on error.",
+            "dependencies": [2, 3],
+            "details": "Use try/finally or context managers to guarantee cleanup.",
+            "status": "done",
+            "testStrategy": "Check temp directory before and after processing, including on error."
+          },
+          {
+            "id": 7,
+            "title": "Write automated tests for URL input",
+            "description": "Create tests for valid/invalid URLs, cleanup, and security.",
+            "dependencies": [1, 2, 3, 4, 5, 6],
+            "details": "Test all edge cases, including security (e.g., path traversal).",
+            "status": "done",
+            "testStrategy": "Automated tests using pytest or unittest."
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "created": "2025-06-21T05:08:05.198Z",
+      "updated": "2025-06-23T08:10:30.005Z",
+      "description": "Tasks for master context"
+    }
+  }
+}

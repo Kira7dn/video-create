@@ -1,0 +1,67 @@
+# Overview
+
+Hệ thống tự động tạo video từ kịch bản ảnh, nhạc nền, và audio voice-over. Giải pháp giúp tự động hóa quy trình dựng video cho các nội dung có cấu trúc, tiết kiệm thời gian sản xuất, phù hợp cho cá nhân, doanh nghiệp sản xuất nội dung số, giáo dục, marketing.
+
+# Core Features
+
+- Nhận đầu vào là tệp JSON chứa các đường dẫn(hình ảnh, nhạc nền, voice-over)
+- Hỗ trợ nhiều định dạng ảnh, audio (mp3, wav)
+- Tự động ghép voice-over, nhạc nền, căn chỉnh thời gian theo voice-over
+- Render ảnh theo kích thước chuẩn
+- Tạo video từ ảnh và audio
+- Xuất video chuẩn mp4 có audio, hình ảnh
+
+# User Experience
+
+- Người dùng chuẩn bị tệp JSON chứa đường dẫn tới ảnh, audio
+- Chạy script Python, hệ thống tự động dựng video hoàn chỉnh
+- Đầu ra là file video mp4 có đầy đủ hình, tiếng
+- Phù hợp cho user không chuyên kỹ thuật, chỉ cần chuẩn bị dữ liệu đầu vào
+
+# Technical Architecture
+
+- Thành phần:
+  - PyDub: Ghép voice-over, nhạc nền, xử lý audio
+  - OpenCV: Đọc, resize ảnh, render frame
+  - MoviePy: Tạo video từ ảnh + audio
+- Data model: JSON kịch bản video
+- Pipeline:
+  1. Nhận đường dẫn trong JSON
+  2. Render ảnh (OpenCV)
+  3. Tạo video raw từ ảnh
+  4. Ghép audio (voice-over + nhạc nền, PyDub)
+  5. Ghép audio vào video (MoviePy)
+  6. Xuất video cuối cùng
+- Hạ tầng: Python 3.12+, các thư viện open-source, chạy tốt trên Linux/WSL
+
+# Development Roadmap
+
+- MVP:
+  - Nhận file JSON chứa đường dẫn tới ảnh, audio đầu vào
+  - Ghép audio, dựng video từ ảnh + audio
+  - Xuất video mp4 hoàn chỉnh
+- Future enhancements:
+  - Chức năng tùy chỉnh nâng cao:
+    - Thêm hiệu ứng chuyển cảnh
+    - Tùy chỉnh thời gian hiển thị ảnh
+    - Thêm phụ đề
+  - UI web upload dữ liệu, xem preview
+  - Hỗ trợ nhiều hiệu ứng chuyển cảnh, nhiều layer
+  - Tự động nhận diện và xử lý nhiều định dạng ảnh, audio
+  - Tùy biến style phụ đề nâng cao
+
+# Logical Dependency Chain
+
+- Bước 1: Xử lý audio (ghép voice, nhạc nền)
+- Bước 2: Render ảnh, tạo video raw
+- Bước 3: Ghép audio vào video
+- Bước 4: Xuất video mp4 hoàn chỉnh
+- Ưu tiên làm xong pipeline cơ bản để có sản phẩm demo nhanh nhất
+
+# Risks and Mitigations
+
+- Lỗi tương thích thư viện (MoviePy): Luôn kiểm tra version, test trên môi trường thật
+- Đầu vào không hợp lệ: Validate JSON, kiểm tra file tồn tại
+- Tối ưu hiệu năng: Xử lý từng bước, log rõ ràng để debug
+- Đảm bảo MVP chạy ổn định trước khi mở rộng tính năng
+  </PRD>
