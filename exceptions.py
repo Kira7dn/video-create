@@ -21,6 +21,13 @@ class VideoProcessingError(Exception):
         super().__init__(self.message)
 
 
+class VideoCreationError(VideoProcessingError):
+    """Custom exception for video creation errors"""
+
+    def __init__(self, message: str, error_code: str = None):
+        super().__init__(message, error_code)
+
+
 class FileValidationError(Exception):
     """Custom exception for file validation errors"""
 

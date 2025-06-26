@@ -1,6 +1,8 @@
 services:
   video:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: cont_video
     ports:
       - "8000:8000"
@@ -9,18 +11,37 @@ services:
     restart: always
     environment:
       - TZ=Asia/Ho_Chi_Minh
-      # Add other environment variables as needed
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - video_temp:/app/tmp
+      - video_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   ngrok_proxy:
     image: ngrok/ngrok:latest
     container_name: cont_ngrok_proxy
-    command: http video:8000
+    command: http video:8000 --log stdout
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-      - NGROK_REGION=ap # or 'us', 'eu', etc.
+      - NGROK_REGION=ap
     restart: always
     networks:
       - video_network
+    depends_on:
+      video:
+        condition: service_healthy
+    ports:
+      - "4040:4040"  # ngrok web interface
+
+volumes:
+  video_temp:
+  video_logs:
 
 networks:
   video_network:

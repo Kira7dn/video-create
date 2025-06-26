@@ -191,56 +191,79 @@ def concatenate_videos_with_sequence(
 ) -> Any:
     """
     Ghép nhiều video với sequence hiệu ứng chuyển cảnh khác nhau giữa từng cặp clip.
-    Args:
-        video_paths: list[str] - danh sách đường dẫn video
-        transitions: list[dict] - mỗi dict gồm {"type": <transition_type>, "duration": <float>} cho từng cặp (len = len(video_paths)-1)
-        default_duration: float - thời lượng mặc định nếu không chỉ định
-    Returns:
-        MoviePy VideoClip đã nối
+    Phiên bản này được tối ưu hóa để tránh xử lý lặp lại và sử dụng phương pháp phù hợp (composition hoặc concatenation).
     """
     clips = _load_video_clips(video_paths)
+    if not clips:
+        return None
 
-    # Validate transitions length
-    if transitions and len(transitions) > len(clips) - 1:
-        transitions = transitions[: len(clips) - 1]
+    # If not enough transitions, pad with None
+    if transitions is None:
+        transitions = []
+    if len(transitions) < len(clips) - 1:
+        transitions.extend([None] * (len(clips) - 1 - len(transitions)))
 
-    if not transitions or len(transitions) != len(clips) - 1:
-        return concatenate_videoclips(clips, method="chain")
+    # If any transition is 'crossfade', the entire sequence must be a CompositeVideoClip
+    if any(t and t.get("type") == "crossfade" for t in transitions):
+        composition_clips = []
+        current_pos = 0.0
+        for i, clip in enumerate(clips):
+            if i == 0:
+                composition_clips.append(clip.with_start(0))
+                current_pos = clip.duration
+                continue
 
-    # Process transitions sequentially
-    result_clip = clips[0]
+            trans = transitions[i - 1] or {}
+            ttype = trans.get("type")
+            tdur = trans.get("duration", default_duration)
 
-    for i in range(1, len(clips)):
-        trans = transitions[i - 1] or {}
-        ttype = trans.get("type", None)
-        tdur = trans.get("duration", default_duration)
-        current_clip = clips[i]
+            if ttype == "crossfade":
+                start_time = current_pos - tdur
+                composition_clips.append(
+                    clip.with_start(start_time).with_effects([vfx.CrossFadeIn(tdur)])
+                )
+                current_pos = start_time + clip.duration
+            else:
+                # For other transitions in composition mode, we just place them sequentially.
+                composition_clips.append(clip.with_start(current_pos))
+                current_pos += clip.duration
 
-        if ttype == "crossfade":
-            # Create crossfade between result_clip and current_clip using official method
-            crossfade_clips = [
-                result_clip,
-                current_clip.with_start(result_clip.duration - tdur).with_effects(
-                    [vfx.CrossFadeIn(tdur)]
-                ),
-            ]
-            result_clip = CompositeVideoClip(crossfade_clips)
-        elif ttype == "fade":
-            result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
-            current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
-            result_clip = concatenate_videoclips(
-                [result_with_fadeout, current_with_fadein], method="chain"
-            )
-        elif ttype == "fadeblack":
-            result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
-            black = ColorClip(size=current_clip.size, color=(0, 0, 0), duration=tdur)
-            current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
-            result_clip = concatenate_videoclips(
-                [result_with_fadeout, black, current_with_fadein], method="chain"
-            )
-        else:
-            result_clip = concatenate_videoclips(
-                [result_clip, current_clip], method="chain"
-            )
+        return CompositeVideoClip(composition_clips)
 
-    return result_clip
+    # If no 'crossfade', we can use the more straightforward concatenation method
+    else:
+        final_clips = []
+        for i, clip in enumerate(clips):
+            # Apply fade-in if the previous transition was 'fade' or 'fadeblack'
+            if i > 0:
+                prev_trans = transitions[i - 1] or {}
+                prev_ttype = prev_trans.get("type")
+                prev_tdur = prev_trans.get("duration", default_duration)
+                if prev_ttype in ["fade", "fadeblack"]:
+                    clip = clip.with_effects([vfx.FadeIn(prev_tdur)])
+
+            # Apply fade-out if the next transition is 'fade'
+            if i < len(clips) - 1:
+                next_trans = transitions[i] or {}
+                next_ttype = next_trans.get("type")
+                next_tdur = next_trans.get("duration", default_duration)
+                if next_ttype == "fade":
+                    clip = clip.with_effects([vfx.FadeOut(next_tdur)])
+
+            final_clips.append(clip)
+
+            # Add a black clip if the next transition is 'fadeblack'
+            if i < len(clips) - 1:
+                next_trans = transitions[i] or {}
+                next_ttype = next_trans.get("type")
+                next_tdur = next_trans.get("duration", default_duration)
+                if next_ttype == "fadeblack":
+                    final_clips[-1] = final_clips[-1].with_effects(
+                        [vfx.FadeOut(next_tdur)]
+                    )
+                    black_clip = ColorClip(
+                        size=clip.size, color=(0, 0, 0), duration=next_tdur
+                    )
+                    final_clips.append(black_clip)
+
+        return concatenate_videoclips(final_clips, method="chain")

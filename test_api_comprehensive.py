@@ -20,7 +20,7 @@ client = TestClient(app)
 @pytest.fixture
 def sample_json_path():
     """Fixture providing path to sample JSON file"""
-    return os.path.join(os.path.dirname(__file__), "..", "input_sample.json")
+    return os.path.join(os.path.dirname(__file__), "input_sample.json")
 
 
 @pytest.fixture

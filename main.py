@@ -13,7 +13,9 @@ import uuid
 import shutil
 import logging
 import json
+import asyncio
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging
 logging.basicConfig(
@@ -53,11 +55,22 @@ class VideoRequest(BaseModel):
     transitions: Optional[str] = None
 
 
+# Helper function for executor
+def run_video_creation(input_data: list, transitions: str = None) -> str:
+    """Helper function to run video creation in executor"""
+    from create_video import create_video_from_json
+
+    return asyncio.run(create_video_from_json(input_data, transitions))
+
+
 # Service Layer
 class VideoService:
     def __init__(self, max_file_size: int = 100 * 1024 * 1024):  # 100MB
         self.max_file_size = max_file_size
         self.logger = logging.getLogger(__name__)
+        self.executor = ThreadPoolExecutor(
+            max_workers=2
+        )  # Limit concurrent video processing
 
     async def validate_upload(self, file: UploadFile) -> None:
         """Validate uploaded file with enhanced checks"""
@@ -84,7 +97,7 @@ class VideoService:
     async def create_video(
         self, input_json: UploadFile, transitions: Optional[str] = None
     ) -> tuple[str, str]:
-        """Create video using proper function calls instead of CLI hack"""
+        """Create video using optimized async function"""
         try:
             await self.validate_upload(input_json)
         except FileValidationError as e:
@@ -125,9 +138,8 @@ class VideoService:
                     },
                 )
 
+            # Use the existing video creation function (simpler approach)
             output_path = os.path.join(tmp_dir, "output_create.mp4")
-
-            # Use proper function call instead of CLI hack
             await self._process_video_batch(input_data, output_path, tmp_dir)
 
             if not os.path.exists(output_path):
@@ -241,6 +253,10 @@ def get_video_service() -> VideoService:
     return VideoService()
 
 
+# Global video service instance
+video_service_instance = VideoService()
+
+
 # Lifespan events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -249,6 +265,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logging.info("Shutting down Video Creation API...")
+    # Cleanup executor
+    video_service_instance.executor.shutdown(wait=True)
 
 
 # FastAPI App
@@ -300,7 +318,7 @@ async def create_video_api(
     input_json: UploadFile = File(
         ..., description="JSON file containing video configuration"
     ),
-    video_service: VideoService = Depends(get_video_service),
+    video_service: VideoService = Depends(lambda: video_service_instance),
     transitions: Optional[str] = None,
 ):
     """
