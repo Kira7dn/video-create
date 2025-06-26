@@ -159,7 +159,7 @@ def concatenate_videos(
                     [vfx.FadeOut(transition_duration)]
                 )
             faded_clips.append(current_clip)
-        return concatenate_videoclips(faded_clips, method="compose")
+        return concatenate_videoclips(faded_clips, method="chain")
     elif transition_type == "fadeblack":
         # Fade out to black, insert black clip, fade in from black
         new_clips = []
@@ -179,15 +179,9 @@ def concatenate_videos(
                 if i > 0:
                     clip = clip.with_effects([vfx.FadeIn(transition_duration)])
                 new_clips.append(clip)
-        return concatenate_videoclips(new_clips, method="compose")
-    elif transition_type == "slideleft":
-        # Use simple concatenation for slide effects - complex positioning can cause issues
-        return concatenate_videoclips(clips, method="compose")
-    elif transition_type == "slideright":
-        # Use simple concatenation for slide effects - complex positioning can cause issues
-        return concatenate_videoclips(clips, method="compose")
+        return concatenate_videoclips(new_clips, method="chain")
     else:
-        return concatenate_videoclips(clips, method="compose")
+        return concatenate_videoclips(clips, method="chain")
 
 
 def concatenate_videos_with_sequence(
@@ -211,12 +205,7 @@ def concatenate_videos_with_sequence(
         transitions = transitions[: len(clips) - 1]
 
     if not transitions or len(transitions) != len(clips) - 1:
-        # Fallback: simple concatenation with optimized method selection
-        same_size = all(
-            clip.size == clips[0].size and clip.fps == clips[0].fps for clip in clips
-        )
-        method = "chain" if same_size else "compose"
-        return concatenate_videoclips(clips, method=method)
+        return concatenate_videoclips(clips, method="chain")
 
     # Process transitions sequentially
     result_clip = clips[0]
@@ -240,24 +229,18 @@ def concatenate_videos_with_sequence(
             result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
             current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
             result_clip = concatenate_videoclips(
-                [result_with_fadeout, current_with_fadein], method="compose"
+                [result_with_fadeout, current_with_fadein], method="chain"
             )
         elif ttype == "fadeblack":
             result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
             black = ColorClip(size=current_clip.size, color=(0, 0, 0), duration=tdur)
             current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
             result_clip = concatenate_videoclips(
-                [result_with_fadeout, black, current_with_fadein], method="compose"
+                [result_with_fadeout, black, current_with_fadein], method="chain"
             )
         else:
-            # Default: simple concatenation
-            same_size = (
-                result_clip.size == current_clip.size
-                and result_clip.fps == current_clip.fps
-            )
-            method = "chain" if same_size else "compose"
             result_clip = concatenate_videoclips(
-                [result_clip, current_clip], method=method
+                [result_clip, current_clip], method="chain"
             )
 
     return result_clip

@@ -1,0 +1,27 @@
+services:
+  video:
+    build: .
+    container_name: cont_video
+    ports:
+      - "8000:8000"
+    networks:
+      - video_network
+    restart: always
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      # Add other environment variables as needed
+
+  ngrok_proxy:
+    image: ngrok/ngrok:latest
+    container_name: cont_ngrok_proxy
+    command: http video:8000
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      - NGROK_REGION=ap # or 'us', 'eu', etc.
+    restart: always
+    networks:
+      - video_network
+
+networks:
+  video_network:
+    driver: bridge
