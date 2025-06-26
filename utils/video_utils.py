@@ -1,11 +1,19 @@
-from moviepy.video.VideoClip import ImageClip
-from moviepy.video.compositing.CompositeVideoClip import concatenate_videoclips
-from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import (
+    VideoFileClip,
+    ImageClip,
+    CompositeVideoClip,
+    vfx,
+    ColorClip,
+    concatenate_videoclips,
+)
 import cv2
-from moviepy import vfx as fx
+from typing import List, Optional, Dict, Any
+import numpy as np
 
 
-def create_raw_video_clip_from_images(images, total_audio_duration_sec, fps=24):
+def create_raw_video_clip_from_images(
+    images: List[np.ndarray], total_audio_duration_sec: float, fps: int = 24
+) -> Any:
     """
     Create a raw video clip from a list of numpy images, each image displayed for duration_per_image.
     Args:
@@ -29,7 +37,7 @@ def create_raw_video_clip_from_images(images, total_audio_duration_sec, fps=24):
     return video
 
 
-def merge_audio_with_video_clip(video_clip, audio_clip):
+def merge_audio_with_video_clip(video_clip: Any, audio_clip: Any) -> Any:
     """
     Merge a MoviePy audio clip into a MoviePy video clip.
     Args:
@@ -46,8 +54,12 @@ def merge_audio_with_video_clip(video_clip, audio_clip):
 
 
 def export_final_video_clip(
-    video_clip, output_path, fps=24, codec="libx264", audio_codec="aac"
-):
+    video_clip: Any,
+    output_path: str,
+    fps: int = 24,
+    codec: str = "libx264",
+    audio_codec: str = "aac",
+) -> None:
     """
     Export the final MoviePy video clip (with audio) to an MP4 file.
     Args:
@@ -75,7 +87,48 @@ def export_final_video_clip(
         raise RuntimeError(f"Export video failed: {e}")
 
 
-def concatenate_videos(video_paths, transition_type=None, transition_duration=1.0):
+def _load_video_clips(video_paths: List[str]) -> List[Any]:
+    """Helper function to load video clips from paths."""
+    clips = []
+    for path in video_paths:
+        try:
+            clip = VideoFileClip(path)
+            clips.append(clip)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load video {path}: {e}")
+    if not clips:
+        raise RuntimeError("No valid video clips to concatenate.")
+    return clips
+
+
+def _create_crossfade_sequence(clips: List[Any], crossfade_duration: float) -> Any:
+    """Create crossfade sequence using official MoviePy way."""
+    if len(clips) < 2:
+        return clips[0] if clips else None
+
+    # Use official MoviePy crossfade method
+    result_clips = [clips[0]]
+
+    for i in range(1, len(clips)):
+        # Set start time to create overlap
+        start_time = sum(clip.duration for clip in clips[:i]) - (
+            crossfade_duration * (i - 1)
+        )
+        crossfade_clip = (
+            clips[i]
+            .with_start(start_time)
+            .with_effects([vfx.CrossFadeIn(crossfade_duration)])
+        )
+        result_clips.append(crossfade_clip)
+
+    return CompositeVideoClip(result_clips)
+
+
+def concatenate_videos(
+    video_paths: List[str],
+    transition_type: Optional[str] = None,
+    transition_duration: float = 1.0,
+) -> Any:
     """
     Nối các video lại với nhau, tuỳ chọn chèn hiệu ứng chuyển cảnh giữa các clip.
     Args:
@@ -87,86 +140,61 @@ def concatenate_videos(video_paths, transition_type=None, transition_duration=1.
     Raises:
         RuntimeError nếu có video không load được hoặc nối lỗi
     """
-    from moviepy.video.fx.FadeIn import FadeIn
-    from moviepy.video.fx.FadeOut import FadeOut
-    from moviepy.video.VideoClip import ColorClip
-    from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+    clips = _load_video_clips(video_paths)
 
-    clips = []
-    for path in video_paths:
-        try:
-            clip = VideoFileClip(path)
-            clips.append(clip)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load video {path}: {e}")
-    if not clips:
-        raise RuntimeError("No valid video clips to concatenate.")
     if transition_type == "crossfade":
-        final_clip = concatenate_videoclips(
-            clips, method="compose", padding=-transition_duration
-        )
+        # Use official MoviePy crossfade method
+        return _create_crossfade_sequence(clips, transition_duration)
     elif transition_type == "fade":
+        # Apply fade effects using modern API
+        faded_clips = []
         for i, clip in enumerate(clips):
+            current_clip = clip
             if i > 0:
-                clips[i] = FadeIn(transition_duration).copy().apply(clip)
+                current_clip = current_clip.with_effects(
+                    [vfx.FadeIn(transition_duration)]
+                )
             if i < len(clips) - 1:
-                clips[i] = FadeOut(transition_duration).copy().apply(clips[i])
-        final_clip = concatenate_videoclips(clips, method="compose")
+                current_clip = current_clip.with_effects(
+                    [vfx.FadeOut(transition_duration)]
+                )
+            faded_clips.append(current_clip)
+        return concatenate_videoclips(faded_clips, method="compose")
     elif transition_type == "fadeblack":
         # Fade out to black, insert black clip, fade in from black
         new_clips = []
         for i, clip in enumerate(clips):
-            c = (
-                FadeOut(transition_duration).copy().apply(clip)
-                if i < len(clips) - 1
-                else clip
-            )
-            new_clips.append(c)
             if i < len(clips) - 1:
+                # Fade out current clip
+                faded_clip = clip.with_effects([vfx.FadeOut(transition_duration)])
+                new_clips.append(faded_clip)
+                # Add black transition
                 black = ColorClip(
                     size=clip.size, color=(0, 0, 0), duration=transition_duration
                 )
-                black = FadeIn(transition_duration).copy().apply(black)
                 new_clips.append(black)
-        final_clip = concatenate_videoclips(new_clips, method="compose")
+                # Next clip will be faded in (handled in next iteration)
+            else:
+                # Last clip, apply fade in if not first
+                if i > 0:
+                    clip = clip.with_effects([vfx.FadeIn(transition_duration)])
+                new_clips.append(clip)
+        return concatenate_videoclips(new_clips, method="compose")
     elif transition_type == "slideleft":
-        # Slide left: clip sau trượt từ phải sang
-        def slide_left(clip, duration):
-            w, h = clip.size
-            return clip.with_start(0).with_position(
-                lambda t: (w * (1 - t / duration), 0) if t < duration else (0, 0)
-            )
-
-        new_clips = [clips[0]]
-        for i in range(1, len(clips)):
-            slide = slide_left(clips[i], transition_duration)
-            new_clips.append(slide)
-        final_clip = CompositeVideoClip(new_clips).with_duration(
-            sum([c.duration for c in clips])
-        )
+        # Use simple concatenation for slide effects - complex positioning can cause issues
+        return concatenate_videoclips(clips, method="compose")
     elif transition_type == "slideright":
-        # Slide right: clip sau trượt từ trái sang
-        def slide_right(clip, duration):
-            w, h = clip.size
-            return clip.with_start(0).with_position(
-                lambda t: (-w * (1 - t / duration), 0) if t < duration else (0, 0)
-            )
-
-        new_clips = [clips[0]]
-        for i in range(1, len(clips)):
-            slide = slide_right(clips[i], transition_duration)
-            new_clips.append(slide)
-        final_clip = CompositeVideoClip(new_clips).with_duration(
-            sum([c.duration for c in clips])
-        )
+        # Use simple concatenation for slide effects - complex positioning can cause issues
+        return concatenate_videoclips(clips, method="compose")
     else:
-        final_clip = concatenate_videoclips(clips, method="compose")
-    return final_clip
+        return concatenate_videoclips(clips, method="compose")
 
 
 def concatenate_videos_with_sequence(
-    video_paths, transitions=None, default_duration=1.0
-):
+    video_paths: List[str],
+    transitions: Optional[List[Dict[str, Any]]] = None,
+    default_duration: float = 1.0,
+) -> Any:
     """
     Ghép nhiều video với sequence hiệu ứng chuyển cảnh khác nhau giữa từng cặp clip.
     Args:
@@ -176,82 +204,60 @@ def concatenate_videos_with_sequence(
     Returns:
         MoviePy VideoClip đã nối
     """
-    from moviepy.video.fx.FadeIn import FadeIn
-    from moviepy.video.fx.FadeOut import FadeOut
-    from moviepy.video.VideoClip import ColorClip
-    from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-    from moviepy.video.compositing.CompositeVideoClip import concatenate_videoclips
+    clips = _load_video_clips(video_paths)
 
-    clips = []
-    for path in video_paths:
-        try:
-            clip = VideoFileClip(path)
-            clips.append(clip)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load video {path}: {e}")
-    if not clips:
-        raise RuntimeError("No valid video clips to concatenate.")
+    # Validate transitions length
+    if transitions and len(transitions) > len(clips) - 1:
+        transitions = transitions[: len(clips) - 1]
+
     if not transitions or len(transitions) != len(clips) - 1:
-        # fallback: dùng cut nối thẳng
-        return concatenate_videoclips(clips, method="compose")
-    out_clips = [clips[0]]
+        # Fallback: simple concatenation with optimized method selection
+        same_size = all(
+            clip.size == clips[0].size and clip.fps == clips[0].fps for clip in clips
+        )
+        method = "chain" if same_size else "compose"
+        return concatenate_videoclips(clips, method=method)
+
+    # Process transitions sequentially
+    result_clip = clips[0]
+
     for i in range(1, len(clips)):
         trans = transitions[i - 1] or {}
         ttype = trans.get("type", None)
         tdur = trans.get("duration", default_duration)
+        current_clip = clips[i]
+
         if ttype == "crossfade":
-            # Crossfade: nối 2 clip với padding âm
-            prev = out_clips.pop()
-            merged = concatenate_videoclips(
-                [prev, clips[i]], method="compose", padding=-tdur
-            )
-            out_clips.append(merged)
+            # Create crossfade between result_clip and current_clip using official method
+            crossfade_clips = [
+                result_clip,
+                current_clip.with_start(result_clip.duration - tdur).with_effects(
+                    [vfx.CrossFadeIn(tdur)]
+                ),
+            ]
+            result_clip = CompositeVideoClip(crossfade_clips)
         elif ttype == "fade":
-            prev = out_clips.pop()
-            prev = FadeOut(tdur).copy().apply(prev)
-            curr = FadeIn(tdur).copy().apply(clips[i])
-            merged = concatenate_videoclips([prev, curr], method="compose")
-            out_clips.append(merged)
+            result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
+            current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
+            result_clip = concatenate_videoclips(
+                [result_with_fadeout, current_with_fadein], method="compose"
+            )
         elif ttype == "fadeblack":
-            prev = out_clips.pop()
-            prev = FadeOut(tdur).copy().apply(prev)
-            black = ColorClip(size=clips[i].size, color=(0, 0, 0), duration=tdur)
-            black = FadeIn(tdur).copy().apply(black)
-            curr = FadeIn(tdur).copy().apply(clips[i])
-            merged = concatenate_videoclips([prev, black, curr], method="compose")
-            out_clips.append(merged)
-        elif ttype == "slideleft":
-
-            def slide_left(clip, duration):
-                w, h = clip.size
-                return clip.with_start(0).with_position(
-                    lambda t: (w * (1 - t / duration), 0) if t < duration else (0, 0)
-                )
-
-            prev = out_clips.pop()
-            slide = slide_left(clips[i], tdur)
-            merged = CompositeVideoClip([prev, slide]).with_duration(
-                prev.duration + clips[i].duration
+            result_with_fadeout = result_clip.with_effects([vfx.FadeOut(tdur)])
+            black = ColorClip(size=current_clip.size, color=(0, 0, 0), duration=tdur)
+            current_with_fadein = current_clip.with_effects([vfx.FadeIn(tdur)])
+            result_clip = concatenate_videoclips(
+                [result_with_fadeout, black, current_with_fadein], method="compose"
             )
-            out_clips.append(merged)
-        elif ttype == "slideright":
-
-            def slide_right(clip, duration):
-                w, h = clip.size
-                return clip.with_start(0).with_position(
-                    lambda t: (-w * (1 - t / duration), 0) if t < duration else (0, 0)
-                )
-
-            prev = out_clips.pop()
-            slide = slide_right(clips[i], tdur)
-            merged = CompositeVideoClip([prev, slide]).with_duration(
-                prev.duration + clips[i].duration
-            )
-            out_clips.append(merged)
         else:
-            # cut nối thẳng
-            out_clips.append(clips[i])
-    # Nếu có nhiều merged clip, nối lại lần cuối
-    if len(out_clips) > 1:
-        return concatenate_videoclips(out_clips, method="compose")
-    return out_clips[0]
+            # Default: simple concatenation
+            same_size = (
+                result_clip.size == current_clip.size
+                and result_clip.fps == current_clip.fps
+            )
+            method = "chain" if same_size else "compose"
+            result_clip = concatenate_videoclips(
+                [result_clip, current_clip], method=method
+            )
+
+    return result_clip

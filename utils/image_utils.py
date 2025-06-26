@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 
 
 def process_images_with_padding(

@@ -23,3 +23,11 @@ node_modules/
 
 # OS specific
 .DS_Store
+
+tmp*/
+
+.roomodes
+.windsurfrules
+test/
+.taskmaster/
+.venv/
