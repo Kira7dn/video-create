@@ -11,7 +11,7 @@
     "voice_over_is_url": true,
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
     "background_music_is_url": true,
-    "transition": { "type": "fade", "duration": 1.0 }
+    "transition": { "type": "fadeblack", "duration": 1.0 }
   },
   {
     "id": "intro",
@@ -25,7 +25,7 @@
     "voice_over_is_url": true,
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
     "background_music_is_url": true,
-    "transition": { "type": "crossfade", "duration": 1.5 }
+    "transition": { "type": "fadeblack", "duration": 1.5 }
   },
   {
     "id": "main-0",
@@ -40,7 +40,7 @@
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
     "background_music_is_url": true,
     "transition": {
-      "type": "fade",
+      "type": "fadeblack",
       "duration": 0.8
     }
   },
@@ -56,7 +56,7 @@
     "voice_over_is_url": true,
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
     "background_music_is_url": true,
-    "transition": { "type": "fade", "duration": 1.2 }
+    "transition": { "type": "fadeblack", "duration": 1.2 }
   },
   {
     "id": "call",
@@ -70,7 +70,7 @@
     "voice_over_is_url": true,
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
     "background_music_is_url": true,
-    "transition": { "type": "crossfade", "duration": 1.0 }
+    "transition": { "type": "fadeblack", "duration": 1.0 }
   },
   {
     "id": "outro",
@@ -83,7 +83,6 @@
     "voice_over": "https://cdn.pixabay.com/download/audio/2023/11/02/audio_b266470215.mp3?filename=thank-for-watching-this-video-voice-174316.mp3",
     "voice_over_is_url": true,
     "background_music": "https://cdn.pixabay.com/download/audio/2025/04/15/audio_981caf755e.mp3?filename=reliable-safe-327618.mp3",
-    "background_music_is_url": true,
-    "transition": { "type": "fade", "duration": 1.0 }
+    "background_music_is_url": true
   }
 ]
