@@ -1,9 +1,9 @@
 {
 	"meta": {
-		"generatedAt": "2025-06-23T05:03:41.366Z",
+		"generatedAt": "2025-06-24T13:39:38.631Z",
 		"tasksAnalyzed": 1,
-		"totalTasks": 10,
-		"analysisCount": 8,
+		"totalTasks": 11,
+		"analysisCount": 9,
 		"thresholdScore": 5,
 		"projectName": "Taskmaster",
 		"usedResearch": false
@@ -72,6 +72,14 @@
 			"recommendedSubtasks": 7,
 			"expansionPrompt": "Break down the task of adding URL input support into distinct implementation steps: planning the integration and temporary file strategy, implementing the URL detection and download logic, managing temporary file creation and cleanup, integrating the download process into the main processing script (`create_video.py`), implementing robust error handling and validation for downloads, writing comprehensive tests covering various scenarios (valid URLs, invalid URLs, network issues, cleanup), and refining the temporary file management and error handling based on testing.",
 			"reasoning": "This task involves significant complexity due to the introduction of external network operations (downloading files), the need for robust error handling for potential network issues and invalid inputs, secure management and cleanup of temporary files, and seamless integration into the existing file-based processing pipeline. Breaking it down into planning, core logic implementation, resource management (temp files), integration, error handling, and testing is crucial."
+		},
+		{
+			"taskId": 11,
+			"taskTitle": "Refactor Pipeline for Batch Processing and Concatenation",
+			"complexityScore": 8,
+			"recommendedSubtasks": 9,
+			"expansionPrompt": "Break down the task of refactoring the video creation pipeline for batch processing and concatenation into actionable subtasks. Include steps for setting up the new input method (argparse, JSON), refactoring the core processing logic into a reusable function, implementing the iteration and temporary file management loop, integrating the concatenation step, handling final output and cleanup, adding comprehensive logging and error handling, and developing/executing the test plan.",
+			"reasoning": "This task involves significant refactoring of the core video processing script to handle multiple inputs via a structured format (JSON array). It requires integrating several existing components (single-cut processing, concatenation), managing temporary files, implementing robust error handling, and adding new input parsing logic. The dependencies on multiple previous tasks also contribute to its complexity as an integration point."
 		}
 	]
 }

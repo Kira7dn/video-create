@@ -1,7 +1,7 @@
 import os
 import glob
 import cv2
-from video_utils.raw_video import create_raw_video_clip_from_images
+from utils.video_utils import create_raw_video_clip_from_images
 
 
 def test_raw_video_creation():
