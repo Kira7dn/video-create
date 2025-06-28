@@ -136,9 +136,8 @@ def _create_clip_from_segment(segment: dict, temp_dir: str) -> VideoFileClip:
             txt_clip = (
                 TextClip(
                     text_info["text"],
-                    fontsize=text_info.get("fontsize", 24),
+                    font_size=text_info.get("fontsize", 24),
                     color=text_info.get("color", "white"),
-                    font=text_info.get("font", "Arial"),
                 )
                 .with_position(text_info.get("position", ("center", "center")))
                 .with_duration(duration)
@@ -193,11 +192,13 @@ async def create_video_from_json(
         # Phase 2: Create individual video clips from downloaded assets
         # This part is CPU-bound and should be run in an executor in a real-world scenario
         # For simplicity here, we run it sequentially after downloads.
-        segment_clips = [
-            _create_clip_from_segment(seg, temp_dir) for seg in processed_segments
-        ]
-
-        segment_paths = [clip.filename for clip in segment_clips]
+        segment_paths = []
+        segment_clips = []
+        for seg in processed_segments:
+            clip = _create_clip_from_segment(seg, temp_dir)
+            segment_clips.append(clip)
+            segment_paths.append(clip.filename if hasattr(clip, "filename") else None)
+        segment_paths = [p for p in segment_paths if p is not None]
 
         # Phase 3: Concatenate clips with transitions
         transitions_config = None

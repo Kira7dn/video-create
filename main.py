@@ -29,7 +29,7 @@ logging.basicConfig(
 class VideoProcessingError(Exception):
     """Custom exception for video processing errors"""
 
-    def __init__(self, message: str, video_id: str = None):
+    def __init__(self, message: str, video_id: Optional[str] = None):
         self.message = message
         self.video_id = video_id
         super().__init__(self.message)
@@ -38,7 +38,7 @@ class VideoProcessingError(Exception):
 class FileValidationError(Exception):
     """Custom exception for file validation errors"""
 
-    def __init__(self, message: str, filename: str = None):
+    def __init__(self, message: str, filename: str = ""):
         self.message = message
         self.filename = filename
         super().__init__(self.message)
@@ -56,7 +56,7 @@ class VideoRequest(BaseModel):
 
 
 # Helper function for executor
-def run_video_creation(input_data: list, transitions: str = None) -> str:
+def run_video_creation(input_data: list, transitions: Optional[str] = None) -> str:
     """Helper function to run video creation in executor"""
     from create_video import create_video_from_json
 
@@ -75,7 +75,7 @@ class VideoService:
     async def validate_upload(self, file: UploadFile) -> None:
         """Validate uploaded file with enhanced checks"""
         if not file.filename:
-            raise FileValidationError("No filename provided", file.filename)
+            raise FileValidationError("No filename provided", file.filename or "")
 
         # Check file extension
         allowed_extensions = [".json"]
@@ -112,7 +112,8 @@ class VideoService:
 
         try:
             # Save uploaded file
-            json_path = os.path.join(tmp_dir, input_json.filename)
+            filename = input_json.filename or "input.json"
+            json_path = os.path.join(tmp_dir, filename)
             with open(json_path, "wb") as f:
                 shutil.copyfileobj(input_json.file, f)
 
