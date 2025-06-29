@@ -115,6 +115,13 @@ class VideoCreationService:
             tasks.append(self._download_file(session, bg_music_url, music_path))
             download_map["background_music"] = music_path
 
+        # Collect download tasks for voice_over
+        if voice_over_url := segment.get("voice_over"):
+            ext = os.path.splitext(urlparse(voice_over_url).path)[1]
+            voice_path = os.path.join(temp_dir, f"download_{uuid.uuid4().hex}{ext}")
+            tasks.append(self._download_file(session, voice_over_url, voice_path))
+            download_map["voice_over"] = voice_path
+
         # Collect TTS generation tasks
         if tts_data := segment.get("tts"):
             tts_text = tts_data.get("text")
@@ -125,7 +132,7 @@ class VideoCreationService:
                 download_map["tts"] = tts_path
 
         # Run all download/TTS tasks concurrently
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks, return_exceptions=False)
 
         # Update segment with local paths
         processed_segment = segment.copy()
@@ -137,6 +144,8 @@ class VideoCreationService:
             processed_segment["background_music_path"] = download_map[
                 "background_music"
             ]
+        if "voice_over" in download_map:
+            processed_segment["voice_over_path"] = download_map["voice_over"]
         if "tts" in download_map:
             processed_segment["tts_path"] = download_map["tts"]
 
@@ -176,7 +185,15 @@ class VideoCreationService:
         # Handle audio
         audio_clips = []
         if bg_music_path := segment.get("background_music_path"):
-            audio_clips.append(AudioFileClip(bg_music_path))
+            # Giảm âm lượng nhạc nền bằng MultiplyVolume effect (đơn giản hơn)
+            from moviepy.audio.fx.MultiplyVolume import MultiplyVolume
+
+            bgm_clip = AudioFileClip(bg_music_path)
+            # Giảm âm lượng xuống 20%
+            bgm_quiet = MultiplyVolume(factor=0.2).apply(bgm_clip)
+            audio_clips.append(bgm_quiet)
+        if voice_over_path := segment.get("voice_over_path"):
+            audio_clips.append(AudioFileClip(voice_over_path))
         if tts_path := segment.get("tts_path"):
             audio_clips.append(AudioFileClip(tts_path))
 
@@ -188,8 +205,9 @@ class VideoCreationService:
         # Set FPS for consistency
         final_clip = final_clip.with_fps(24)
 
-        # Write to a temporary file to stabilize it before concatenation
-        segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_type}.mp4")
+        # Use a unique identifier for the segment output filename
+        segment_id = segment.get("id") or segment_type or str(uuid.uuid4())
+        segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
         export_final_video_clip(final_clip, segment_output_path)
 
         # Return a clip loaded from the stable file
@@ -240,19 +258,58 @@ class VideoCreationService:
             output_path = os.path.join(temp_dir, f"final_video_{video_id}.mp4")
             export_final_video_clip(final_video, output_path)
 
+            # Copy to final output location outside temp directory
+            final_output_path = f"final_video_{video_id}.mp4"
+            if os.path.exists(output_path):
+                shutil.copy2(output_path, final_output_path)
+                logger.info(f"✅ Copied video to final location: {final_output_path}")
+            else:
+                raise VideoCreationError(f"Output video not found: {output_path}")
+
             # Close all file handles held by clips
             for clip in segment_clips:
                 clip.close()
             if final_video:
                 final_video.close()
 
-            return output_path
+            return final_output_path
 
         except Exception as e:
             logger.error(f"Video creation failed: {e}", exc_info=True)
             # Clean up on failure
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise VideoCreationError(f"Video creation failed: {e}") from e
+        finally:
+            # Always cleanup temp directory after processing
+            # We delay cleanup a bit to ensure file handles are closed
+            import time
+            import gc
+
+            # Force garbage collection to ensure all file handles are closed
+            gc.collect()
+            time.sleep(1.0)  # Longer delay to ensure file handles are released
+
+            # Retry cleanup with multiple attempts
+            cleanup_attempts = 3
+            for attempt in range(cleanup_attempts):
+                try:
+                    if os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
+                        break
+                    else:
+                        logger.info(f"⚠️ Temp directory already removed: {temp_dir}")
+                        break
+                except Exception as cleanup_error:
+                    if attempt < cleanup_attempts - 1:
+                        logger.warning(
+                            f"⚠️ Cleanup attempt {attempt + 1} failed for {temp_dir}: {cleanup_error}"
+                        )
+                        time.sleep(2.0)  # Wait before retry
+                    else:
+                        logger.warning(
+                            f"❌ Final cleanup attempt failed for {temp_dir}: {cleanup_error}"
+                        )
 
     def process_single_cut(
         self, data: dict, tmp_dir: str, cut_id: Optional[str] = None
@@ -325,55 +382,43 @@ class VideoCreationService:
         data_array: List[Dict[Any, Any]],
         transitions: Optional[Any] = None,
         tmp_dir: str = "tmp_pipeline",
+        batch_uuid: Optional[str] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
-        """Process batch video creation from array of data"""
+        """Process batch video creation from array of data (dùng lại logic như /create, đồng bộ uuid)"""
         os.makedirs(tmp_dir, exist_ok=True)
+        cut_results = []
+        segment_paths = []
+        segment_clips = []
         temp_files = []
-        url_to_local = {}
-
         try:
-            # --- Download & replace URLs with local paths ---
-            url_list = []
-            for data in data_array:
-                for img in data["images"]:
-                    if img.get("is_url"):
-                        url_list.append(img["path"])
-                for key in ["voice_over", "background_music"]:
-                    if data.get(f"{key}_is_url"):
-                        url_list.append(data[key])
+            # Phase 1: Download all assets concurrently cho từng segment
+            async with aiohttp.ClientSession() as session:
+                processing_tasks = [
+                    self._process_segment(session, seg, tmp_dir) for seg in data_array
+                ]
+                processed_segments = await asyncio.gather(*processing_tasks)
 
-            # Download
-            if url_list:
-                local_paths, download_errors = batch_download_urls(url_list, tmp_dir)
-                for url, local in zip(url_list, local_paths):
-                    if local:
-                        url_to_local[url] = local
-                        temp_files.append(local)
-                if download_errors:
-                    raise VideoCreationError(f"Download errors: {download_errors}")
+            # Log temp_dir contents after segment processing
+            logger.info(
+                f"[BATCH] temp_dir contents after segment processing: {os.listdir(tmp_dir)}"
+            )
 
-            # Replace URLs with local paths
-            data_array = [
-                replace_url_with_local_path(data, url_to_local) for data in data_array
-            ]
-
-            # Process each cut
-            logger.info("Processing each cut...")
-            temp_video_paths = []
-            cut_results = []
-            per_cut_temp_files = []
-
-            for idx, data in enumerate(data_array):
-                cut_id = data.get("id") or f"cut{idx+1}"
+            # Phase 2: Tạo từng video clip từ asset đã tải
+            for idx, seg in enumerate(processed_segments):
+                cut_id = seg.get("id") or f"cut{idx+1}"
                 try:
-                    temp_video_path = self.process_single_cut(data, tmp_dir, cut_id)
-                    temp_video_paths.append(temp_video_path)
-                    per_cut_temp_files.append(temp_video_path)
+                    clip = self._create_clip_from_segment(seg, tmp_dir)
+                    segment_clips.append(clip)
+                    segment_paths.append(
+                        clip.filename if hasattr(clip, "filename") else None
+                    )
                     cut_results.append(
                         {
                             "id": cut_id,
                             "status": "success",
-                            "video_path": temp_video_path,
+                            "video_path": (
+                                clip.filename if hasattr(clip, "filename") else None
+                            ),
                             "error": None,
                         }
                     )
@@ -387,51 +432,63 @@ class VideoCreationService:
                         }
                     )
 
-            # Summary
-            logger.info("Batch processing summary:")
-            for res in cut_results:
-                if res["status"] == "success":
-                    logger.info(f"  [CUT {res['id']}] OK")
-                else:
-                    logger.error(f"  [CUT {res['id']}] ERROR: {res['error']}")
+            segment_paths = [p for p in segment_paths if p is not None]
 
-            # --- Concatenate video cuts ---
-            logger.info("Concatenating video cuts...")
-            valid_video_paths = [
-                res["video_path"]
-                for res in cut_results
-                if res["status"] == "success" and res["video_path"]
-            ]
-
-            if not valid_video_paths:
-                raise VideoCreationError("No valid video cuts to concatenate")
-
+            # Phase 3: Concatenate clips with transitions
+            transitions_config = None
             if transitions is None:
                 transitions = [
                     obj.get("transition") for obj in data_array if "transition" in obj
                 ]
 
+            logger.info(f"[BATCH] segment_paths: {segment_paths}")
+            logger.info(f"[BATCH] transitions: {transitions}")
+            # Dùng batch_uuid cho tên file output nếu có
+            if batch_uuid:
+                output_filename = f"final_batch_video_{batch_uuid}.mp4"
+            else:
+                output_filename = f"final_batch_video_{uuid.uuid4().hex}.mp4"
+            output_path = os.path.join(tmp_dir, output_filename)
+            logger.info(f"[BATCH] Sẽ ghi file output: {output_path}")
             final_clip = concatenate_videos_with_sequence(
-                valid_video_paths, transitions=transitions
+                segment_paths, transitions=transitions
             )
+            logger.info(f"[BATCH] final_clip: {final_clip}")
+            try:
+                final_clip.write_videofile(
+                    output_path, codec="libx264", audio_codec="aac", logger=None
+                )
+            except Exception as e:
+                logger.error(f"[BATCH] Lỗi khi ghi file video: {e}")
+                raise VideoCreationError(f"Failed to write batch video: {e}")
+            finally:
+                final_clip.close()
 
-            # Generate output path
-            output_path = os.path.join(
-                tmp_dir, f"final_batch_video_{uuid.uuid4().hex}.mp4"
+            # Log temp_dir contents after final video export
+            logger.info(
+                f"[BATCH] temp_dir contents after final video export: {os.listdir(tmp_dir)}"
             )
-            final_clip.write_videofile(
-                output_path, codec="libx264", audio_codec="aac", logger=None
-            )
-            final_clip.close()
 
             logger.info(f"SUCCESS: Final video created at {output_path}")
+            if not os.path.exists(output_path):
+                logger.error(f"[BATCH] File output KHÔNG tồn tại: {output_path}")
+                raise VideoCreationError(f"Batch output file not found: {output_path}")
+
+            # Copy to final output location outside temp directory
+            final_output_path = output_filename  # Remove tmp_dir path
+            if os.path.exists(output_path):
+                shutil.copy2(output_path, final_output_path)
+                logger.info(
+                    f"✅ Copied batch video to final location: {final_output_path}"
+                )
+            else:
+                raise VideoCreationError(f"Batch output video not found: {output_path}")
 
             # Cleanup temp video cuts
-            for f in per_cut_temp_files:
-                if os.path.exists(f):
-                    os.remove(f)
+            for clip in segment_clips:
+                clip.close()
 
-            return output_path, cut_results
+            return final_output_path, cut_results
 
         except Exception as e:
             logger.error(f"Batch video creation failed: {e}")
@@ -442,14 +499,106 @@ class VideoCreationService:
                 if os.path.exists(f):
                     os.remove(f)
 
+            # Always cleanup temp directory after processing
+            import time
+            import gc
+
+            # Force garbage collection to ensure all file handles are closed
+            gc.collect()
+            time.sleep(1.0)  # Longer delay to ensure file handles are released
+
+            # Retry cleanup with multiple attempts
+            cleanup_attempts = 3
+            for attempt in range(cleanup_attempts):
+                try:
+                    if os.path.exists(tmp_dir):
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        logger.info(
+                            f"✅ Cleaned up batch temporary directory: {tmp_dir}"
+                        )
+                        break
+                    else:
+                        logger.info(
+                            f"⚠️ Batch temp directory already removed: {tmp_dir}"
+                        )
+                        break
+                except Exception as cleanup_error:
+                    if attempt < cleanup_attempts - 1:
+                        logger.warning(
+                            f"⚠️ Batch cleanup attempt {attempt + 1} failed for {tmp_dir}: {cleanup_error}"
+                        )
+                        time.sleep(2.0)  # Wait before retry
+                    else:
+                        logger.warning(
+                            f"❌ Final batch cleanup attempt failed for {tmp_dir}: {cleanup_error}"
+                        )
+
     def cleanup_temp_directory(self, temp_dir: str):
-        """Clean up temporary directory"""
+        """Clean up temporary directory with Windows-specific handling"""
+        import time
+        import gc
+        import platform
+
         try:
-            if os.path.exists(temp_dir):
+            if not os.path.exists(temp_dir):
+                logger.info(f"⚠️ Temp directory not found for cleanup: {temp_dir}")
+                return
+
+            # Force garbage collection to release file handles
+            gc.collect()
+
+            # Windows-specific handling with retries
+            if platform.system() == "Windows":
+                cleanup_attempts = 5
+                for attempt in range(cleanup_attempts):
+                    try:
+                        shutil.rmtree(temp_dir)
+                        logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
+                        return
+                    except PermissionError as e:
+                        if attempt < cleanup_attempts - 1:
+                            logger.warning(
+                                f"⚠️ Temp directory cleanup attempt {attempt + 1} failed, retrying in 3s: {e}"
+                            )
+                            time.sleep(3.0)
+                            gc.collect()
+                        else:
+                            logger.warning(
+                                f"❌ Failed to cleanup temp directory {temp_dir} after {cleanup_attempts} attempts: {e}"
+                            )
+                            # Fallback: try to remove individual files
+                            try:
+                                for root, dirs, files in os.walk(
+                                    temp_dir, topdown=False
+                                ):
+                                    for file in files:
+                                        try:
+                                            os.remove(os.path.join(root, file))
+                                        except:
+                                            pass
+                                    for dir_name in dirs:
+                                        try:
+                                            os.rmdir(os.path.join(root, dir_name))
+                                        except:
+                                            pass
+                                os.rmdir(temp_dir)
+                                logger.info(
+                                    f"✅ Cleaned up temporary directory (fallback): {temp_dir}"
+                                )
+                            except Exception as fallback_error:
+                                logger.warning(
+                                    f"❌ Fallback cleanup also failed for {temp_dir}: {fallback_error}"
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            f"❌ Unexpected error during temp directory cleanup: {e}"
+                        )
+                        break
+            else:
+                # Non-Windows systems
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
-            else:
-                logger.info(f"⚠️ Temp directory not found for cleanup: {temp_dir}")
+
         except Exception as e:
             logger.warning(f"❌ Failed to clean up temp directory {temp_dir}: {e}")
 

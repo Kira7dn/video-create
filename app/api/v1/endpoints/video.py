@@ -9,7 +9,8 @@ import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from app.models.requests import VideoRequest, BatchVideoRequest
 from app.models.responses import (
@@ -99,9 +100,9 @@ async def create_video(
         processing_time = time.time() - start_time
 
         # Schedule cleanup in background
-        # background_tasks.add_task(
-        #     video_service.cleanup_temp_directory, os.path.dirname(output_path)
-        # )
+        background_tasks.add_task(
+            video_service.cleanup_temp_directory, os.path.dirname(output_path)
+        )
 
         return VideoCreationResponse(
             success=True,
@@ -145,7 +146,8 @@ async def create_batch_video(
     - **file**: JSON file containing array of video cuts
     """
     start_time = time.time()
-    temp_dir = f"tmp_batch_{uuid.uuid4().hex}"
+    batch_uuid = uuid.uuid4().hex
+    temp_dir = f"tmp_batch_{batch_uuid}"
 
     try:
         # Validate uploaded file
@@ -180,9 +182,9 @@ async def create_batch_video(
                 },
             )
 
-        # Process batch video creation
+        # Process batch video creation, truyền batch_uuid vào để dùng cho tên file output
         output_path, cut_results = await video_service.process_batch_video_creation(
-            json_data, tmp_dir=temp_dir
+            json_data, tmp_dir=temp_dir, batch_uuid=batch_uuid
         )
 
         # Calculate statistics
@@ -235,17 +237,12 @@ async def create_batch_video(
         logger.error(f"Unexpected error in batch video creation: {e}")
         raise HTTPException(
             status_code=500,
-            detail={
-                "error": "Internal server error",
-                "details": "An unexpected error occurred",
-            },
+            detail={"error": "Unexpected error", "details": str(e)},
         )
 
 
 @router.get("/download/{filename}")
-async def download_video(
-    filename: str, background_tasks: BackgroundTasks = BackgroundTasks()
-):
+async def download_video(filename: str):
     """
     Download a created video file
 
@@ -262,15 +259,38 @@ async def download_video(
         )
 
     # Look for file in common temp directories
-    possible_paths = [
-        os.path.join(f"tmp_create_{filename.split('_')[2].split('.')[0]}", filename),
-        os.path.join(f"tmp_batch_{filename.split('_')[2].split('.')[0]}", filename),
-        filename,  # Direct path
-    ]
+    # Extract UUID from filename pattern: final_batch_video_{uuid}.mp4 or final_video_{uuid}.mp4
+    if filename.startswith("final_batch_video_"):
+        uuid_part = filename.replace("final_batch_video_", "").replace(".mp4", "")
+        possible_paths = [
+            os.path.join(f"tmp_batch_{uuid_part}", filename),
+            filename,  # Direct path
+        ]
+    elif filename.startswith("final_video_"):
+        uuid_part = filename.replace("final_video_", "").replace(".mp4", "")
+        possible_paths = [
+            os.path.join(f"tmp_create_{uuid_part}", filename),
+            filename,  # Direct path
+        ]
+    else:
+        # Fallback to old logic for other filename patterns
+        possible_paths = [
+            os.path.join(
+                f"tmp_create_{filename.split('_')[2].split('.')[0]}", filename
+            ),
+            os.path.join(f"tmp_batch_{filename.split('_')[2].split('.')[0]}", filename),
+            filename,  # Direct path
+        ]
+
+    logger.info(f"[DOWNLOAD] Looking for file: {filename}")
+    logger.info(f"[DOWNLOAD] Possible paths: {possible_paths}")
 
     file_path = None
     temp_dir = None
     for path in possible_paths:
+        logger.info(
+            f"[DOWNLOAD] Checking path: {path} - exists: {os.path.exists(path)}"
+        )
         if os.path.exists(path):
             file_path = path
             temp_dir = os.path.dirname(path)
@@ -285,9 +305,71 @@ async def download_video(
             },
         )
 
-    # Schedule cleanup after download
-    if temp_dir:
-        logger.info(f"📋 Scheduling cleanup for: {temp_dir}")
-        background_tasks.add_task(video_service.cleanup_temp_directory, temp_dir)
+    # Cleanup callback: xóa file output và temp directory sau khi response đã gửi xong
+    def cleanup():
+        import time
+        import gc
+        import platform
 
-    return FileResponse(path=file_path, filename=filename, media_type="video/mp4")
+        # Wait longer on Windows to ensure file handles are fully released
+        wait_time = 5.0 if platform.system() == "Windows" else 2.0
+        time.sleep(wait_time)
+        gc.collect()
+
+        # Additional wait and force garbage collection for Windows
+        if platform.system() == "Windows":
+            time.sleep(2.0)
+            gc.collect()
+
+        # Cleanup output file in root directory with retry
+        if file_path and os.path.exists(file_path) and not os.path.dirname(file_path):
+            # Only cleanup files in root directory (final_video_*.mp4)
+            cleanup_attempts = 5  # More attempts for Windows
+            for attempt in range(cleanup_attempts):
+                try:
+                    # Force close any potential file handles before removal
+                    gc.collect()
+                    os.remove(file_path)
+                    logger.info(f"🗑️ Cleaned up output file: {file_path}")
+                    break
+                except PermissionError as e:
+                    if attempt < cleanup_attempts - 1:
+                        wait_retry = 5.0 if platform.system() == "Windows" else 3.0
+                        logger.warning(
+                            f"⚠️ Output file cleanup attempt {attempt + 1} failed, retrying in {wait_retry}s: {e}"
+                        )
+                        time.sleep(wait_retry)
+                        gc.collect()  # Force garbage collection before retry
+                    else:
+                        logger.warning(
+                            f"❌ Failed to cleanup output file {file_path} after {cleanup_attempts} attempts: {e}"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to cleanup output file {file_path}: {e}")
+                    break
+
+        # Cleanup temp directory if exists
+        if temp_dir and temp_dir != ".":
+            logger.info(f"📋 Cleanup after download for: {temp_dir}")
+            video_service.cleanup_temp_directory(temp_dir)
+
+    def generate_file():
+        """Generator to read file and ensure it's properly closed"""
+        try:
+            with open(file_path, "rb") as f:
+                while True:
+                    data = f.read(8192)  # Read in 8KB chunks
+                    if not data:
+                        break
+                    yield data
+        except Exception as e:
+            logger.error(f"Error reading file {file_path}: {e}")
+            raise
+
+    response = StreamingResponse(
+        generate_file(),
+        media_type="video/mp4",
+        background=BackgroundTask(cleanup),
+    )
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
