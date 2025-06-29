@@ -91,10 +91,6 @@ input_sample*.json
 *_sample.*
 *_example.*
 
-# Development scripts
-test_*.py
-*_test.py
-
 # Build and deployment
 docker_test_output.mp4
 *.pyc
