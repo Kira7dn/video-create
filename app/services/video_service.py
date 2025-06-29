@@ -27,7 +27,7 @@ from moviepy import (
 )
 import soundfile as sf
 import numpy as np
-from gtts import gTTS
+
 
 from utils.audio_utils import (
     load_audio_file,
@@ -74,19 +74,6 @@ class VideoCreationService:
             logger.error(f"Failed to download {url}: {e}")
             raise VideoCreationError(f"Failed to download resource: {url}") from e
 
-    async def _generate_tts(self, text: str, lang: str, dest_path: str):
-        """Asynchronously generates TTS audio and saves it."""
-        try:
-            # gTTS is not async, so we run it in a thread pool to avoid blocking
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None, lambda: gTTS(text=text, lang=lang).save(dest_path)
-            )
-            logger.info(f"Successfully generated TTS for '{text[:20]}...'")
-        except Exception as e:
-            logger.error(f"Failed to generate TTS: {e}")
-            raise VideoCreationError("Failed to generate TTS audio") from e
-
     async def _process_segment(
         self, session: aiohttp.ClientSession, segment: dict, temp_dir: str
     ) -> dict:
@@ -122,19 +109,10 @@ class VideoCreationService:
             tasks.append(self._download_file(session, voice_over_url, voice_path))
             download_map["voice_over"] = voice_path
 
-        # Collect TTS generation tasks
-        if tts_data := segment.get("tts"):
-            tts_text = tts_data.get("text")
-            tts_lang = tts_data.get("lang", "en")
-            if tts_text:
-                tts_path = os.path.join(temp_dir, f"tts_{uuid.uuid4().hex}.mp3")
-                tasks.append(self._generate_tts(tts_text, tts_lang, tts_path))
-                download_map["tts"] = tts_path
-
-        # Run all download/TTS tasks concurrently
+        # Run all download tasks concurrently
         await asyncio.gather(*tasks, return_exceptions=False)
 
-        # Update segment with local paths
+        # Update segment with local paths and determine duration
         processed_segment = segment.copy()
         if "background_image" in download_map:
             processed_segment["background_image_path"] = download_map[
@@ -146,16 +124,31 @@ class VideoCreationService:
             ]
         if "voice_over" in download_map:
             processed_segment["voice_over_path"] = download_map["voice_over"]
-        if "tts" in download_map:
-            processed_segment["tts_path"] = download_map["tts"]
+            # ALWAYS get duration from voice_over - this is the primary audio content
+            try:
+                voice_clip = AudioFileClip(download_map["voice_over"])
+                processed_segment["duration"] = voice_clip.duration
+                voice_clip.close()
+                logger.info(
+                    f"Set segment duration from voice_over: {processed_segment['duration']:.2f}s"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to get duration from voice_over: {e}")
+                processed_segment["duration"] = 5  # fallback
+        else:
+            # If no voice_over, use default duration
+            processed_segment["duration"] = 5  # default duration
+            logger.info("No voice_over found, using default segment duration: 5s")
 
         return processed_segment
 
     def _create_clip_from_segment(self, segment: dict, temp_dir: str) -> VideoFileClip:
         """Creates a video clip from a processed segment dictionary."""
         segment_type = segment.get("type")
-        duration = segment.get("duration", 5)
+        duration = segment["duration"]  # Duration is always set in _process_segment
         bg_image_path = segment.get("background_image_path")
+
+        logger.info(f"Creating clip with duration: {duration:.2f}s")
 
         if not bg_image_path or not os.path.exists(bg_image_path):
             raise VideoCreationError(f"Background image not found for segment.")
@@ -182,25 +175,33 @@ class VideoCreationService:
         # Combine base clip with text clips
         final_clip = CompositeVideoClip([clip] + text_clips, size=clip.size)
 
-        # Handle audio
+        # Handle audio - trim/extend to match video duration
         audio_clips = []
         if bg_music_path := segment.get("background_music_path"):
-            # Giảm âm lượng nhạc nền bằng MultiplyVolume effect (đơn giản hơn)
+            # Reduce background music volume using MultiplyVolume effect
             from moviepy.audio.fx.MultiplyVolume import MultiplyVolume
 
             bgm_clip = AudioFileClip(bg_music_path)
-            # Giảm âm lượng xuống 20%
+            # If background music is shorter than video, loop it
+            if bgm_clip.duration < duration:
+                bgm_clip = bgm_clip.with_duration(duration).with_fps(44100)
+            else:
+                # Trim to video duration
+                bgm_clip = bgm_clip.with_duration(duration)
+
+            # Reduce volume to 20%
             bgm_quiet = MultiplyVolume(factor=0.2).apply(bgm_clip)
             audio_clips.append(bgm_quiet)
+
         if voice_over_path := segment.get("voice_over_path"):
-            audio_clips.append(AudioFileClip(voice_over_path))
-        if tts_path := segment.get("tts_path"):
-            audio_clips.append(AudioFileClip(tts_path))
+            voice_clip = AudioFileClip(voice_over_path)
+            # Voice over determines the duration, don't trim it
+            audio_clips.append(voice_clip)
 
         if audio_clips:
             # Combine audio clips and set to video
             composite_audio = CompositeAudioClip(audio_clips)
-            final_clip = final_clip.with_audio(composite_audio.with_duration(duration))
+            final_clip = final_clip.with_audio(composite_audio)
 
         # Set FPS for consistency
         final_clip = final_clip.with_fps(24)
@@ -213,9 +214,7 @@ class VideoCreationService:
         # Return a clip loaded from the stable file
         return VideoFileClip(segment_output_path)
 
-    async def create_video_from_json(
-        self, json_data: list, transitions_override: Optional[str] = None
-    ) -> str:
+    async def create_video_from_json(self, json_data: list) -> str:
         """
         Main async function to create a video from a JSON structure.
         Manages temp directories, parallel downloads, and video processing.
@@ -235,7 +234,10 @@ class VideoCreationService:
             # Phase 2: Create individual video clips from downloaded assets
             segment_paths = []
             segment_clips = []
+            segment_transitions = []
             for seg in processed_segments:
+                transition = seg.get("transition")
+                segment_transitions.append(transition)
                 clip = self._create_clip_from_segment(seg, temp_dir)
                 segment_clips.append(clip)
                 segment_paths.append(
@@ -244,14 +246,9 @@ class VideoCreationService:
             segment_paths = [p for p in segment_paths if p is not None]
 
             # Phase 3: Concatenate clips with transitions
-            transitions_config = None
-            if transitions_override:
-                transitions_config = [
-                    {"type": transitions_override, "duration": 1.0}
-                ] * (len(segment_paths) - 1)
 
             final_video = concatenate_videos_with_sequence(
-                segment_paths, transitions=transitions_config
+                segment_paths, transitions=segment_transitions
             )
 
             # Phase 4: Export final video
@@ -311,71 +308,71 @@ class VideoCreationService:
                             f"❌ Final cleanup attempt failed for {temp_dir}: {cleanup_error}"
                         )
 
-    def process_single_cut(
-        self, data: dict, tmp_dir: str, cut_id: Optional[str] = None
-    ) -> str:
-        """Process a single video cut from data"""
-        cut_id = cut_id or data.get("id") or str(uuid.uuid4())
-        temp_files = []
-        logger.info(f"[CUT {cut_id}] Start processing")
+    # def process_single_cut(
+    #     self, data: dict, tmp_dir: str, cut_id: Optional[str] = None
+    # ) -> str:
+    #     """Process a single video cut from data"""
+    #     cut_id = cut_id or data.get("id") or str(uuid.uuid4())
+    #     temp_files = []
+    #     logger.info(f"[CUT {cut_id}] Start processing")
 
-        try:
-            # 1. Process images
-            image_paths = [img["path"] for img in data["images"]]
-            padded_images = process_images_with_padding(
-                image_paths, target_size=(1280, 720), pad_color=(0, 0, 0)
-            )
+    #     try:
+    #         # 1. Process images
+    #         image_paths = [img["path"] for img in data["images"]]
+    #         padded_images = process_images_with_padding(
+    #             image_paths, target_size=(1280, 720), pad_color=(0, 0, 0)
+    #         )
 
-            # 2. Process audio
-            voice_seg = load_audio_file(data["voice_over"])
-            bgm_seg = load_audio_file(data["background_music"])
-            bgm_seg = manage_audio_duration(bgm_seg, voice_seg["duration_ms"])
-            mixed_seg = mix_audio(voice_seg, bgm_seg, bgm_gain_when_voice=-15)
+    #         # 2. Process audio
+    #         voice_seg = load_audio_file(data["voice_over"])
+    #         bgm_seg = load_audio_file(data["background_music"])
+    #         bgm_seg = manage_audio_duration(bgm_seg, voice_seg["duration_ms"])
+    #         mixed_seg = mix_audio(voice_seg, bgm_seg, bgm_gain_when_voice=-15)
 
-            temp_mixed_path = os.path.join(tmp_dir, f"temp_mixed_audio_{cut_id}.mp3")
-            save_audio_to_file(mixed_seg, temp_mixed_path, format="mp3")
-            temp_files.append(temp_mixed_path)
+    #         temp_mixed_path = os.path.join(tmp_dir, f"temp_mixed_audio_{cut_id}.mp3")
+    #         save_audio_to_file(mixed_seg, temp_mixed_path, format="mp3")
+    #         temp_files.append(temp_mixed_path)
 
-            mixed_audio = AudioFileClip(temp_mixed_path)
-            total_audio_duration_sec = mixed_audio.duration
-            fps = 24
+    #         mixed_audio = AudioFileClip(temp_mixed_path)
+    #         total_audio_duration_sec = mixed_audio.duration
+    #         fps = 24
 
-            # 3. Create video from images
-            video_clip = create_raw_video_clip_from_images(
-                padded_images, total_audio_duration_sec, fps
-            )
+    #         # 3. Create video from images
+    #         video_clip = create_raw_video_clip_from_images(
+    #             padded_images, total_audio_duration_sec, fps
+    #         )
 
-            # 4. Merge audio and video
-            merged_clip = merge_audio_with_video_clip(video_clip, mixed_audio)
+    #         # 4. Merge audio and video
+    #         merged_clip = merge_audio_with_video_clip(video_clip, mixed_audio)
 
-            # 5. Export to temp video file
-            temp_video_path = os.path.join(tmp_dir, f"temp_cut_{cut_id}.mp4")
-            export_final_video_clip(
-                merged_clip,
-                temp_video_path,
-                fps=fps,
-                codec="libx264",
-                audio_codec="aac",
-            )
-            logger.info(f"[CUT {cut_id}] Finished: {temp_video_path}")
+    #         # 5. Export to temp video file
+    #         temp_video_path = os.path.join(tmp_dir, f"temp_cut_{cut_id}.mp4")
+    #         export_final_video_clip(
+    #             merged_clip,
+    #             temp_video_path,
+    #             fps=fps,
+    #             codec="libx264",
+    #             audio_codec="aac",
+    #         )
+    #         logger.info(f"[CUT {cut_id}] Finished: {temp_video_path}")
 
-            # Cleanup
-            merged_clip.close()
-            mixed_audio.close()
-            video_clip.close()
-            for f in temp_files:
-                if os.path.exists(f):
-                    os.remove(f)
+    #         # Cleanup
+    #         merged_clip.close()
+    #         mixed_audio.close()
+    #         video_clip.close()
+    #         for f in temp_files:
+    #             if os.path.exists(f):
+    #                 os.remove(f)
 
-            return temp_video_path
+    #         return temp_video_path
 
-        except Exception as e:
-            logger.error(f"[CUT {cut_id}] Error: {e}")
-            # Attempt cleanup on error
-            for f in temp_files:
-                if os.path.exists(f):
-                    os.remove(f)
-            raise VideoCreationError(f"Failed to process cut {cut_id}: {e}") from e
+    #     except Exception as e:
+    #         logger.error(f"[CUT {cut_id}] Error: {e}")
+    #         # Attempt cleanup on error
+    #         for f in temp_files:
+    #             if os.path.exists(f):
+    #                 os.remove(f)
+    #         raise VideoCreationError(f"Failed to process cut {cut_id}: {e}") from e
 
     async def process_batch_video_creation(
         self,

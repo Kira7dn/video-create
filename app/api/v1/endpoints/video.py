@@ -54,14 +54,12 @@ async def validate_upload_file(file: UploadFile) -> None:
 @router.post("/create", response_model=VideoCreationResponse)
 async def create_video(
     file: UploadFile = File(...),
-    transitions: Optional[str] = None,
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
     Create a video from uploaded JSON configuration
 
     - **file**: JSON file containing video configuration
-    - **transitions**: Optional transition type between segments
     """
     start_time = time.time()
     video_id = str(uuid.uuid4())
@@ -91,7 +89,7 @@ async def create_video(
             )
 
         # Create video using service
-        output_path = await video_service.create_video_from_json(json_data, transitions)
+        output_path = await video_service.create_video_from_json(json_data)
 
         # Get file information
         file_size = (

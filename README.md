@@ -102,3 +102,9 @@ python create_video.py --input input_sample.json --output final_output.mp4
 ```
 
 This will process all cuts in `input_sample.json` and produce `final_output.mp4`.
+
+
+## Avaiable Transitions
+- `fadeblack`: Fades to black between cuts.
+- `crossfade`: Crossfades between cuts.
+- `fade`: A generic fade transition.
