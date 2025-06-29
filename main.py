@@ -168,16 +168,65 @@ class VideoService:
                 detail={"error": "Internal server error", "details": str(e)},
             )
 
+    def _convert_to_simple_format(self, data: dict) -> dict:
+        """Convert simplified JSON format for process_single_cut compatibility"""
+        converted_data = data.copy()
+
+        # Convert images from direct strings to objects with path and is_url=False
+        if "images" in converted_data:
+            converted_images = []
+            for img in converted_data["images"]:
+                if isinstance(img, str):
+                    # Direct string -> convert to object format
+                    converted_images.append(
+                        {
+                            "path": img,
+                            "is_url": False,  # Already downloaded and replaced with local path
+                        }
+                    )
+                else:
+                    # Already in object format (shouldn't happen with new format only)
+                    converted_images.append(img)
+            converted_data["images"] = converted_images
+
+        # Add _is_url flags for audio (always False since already downloaded)
+        for key in ["voice_over", "background_music"]:
+            if key in converted_data:
+                converted_data[f"{key}_is_url"] = False
+
+        return converted_data
+
+    def _replace_urls_with_local_paths_simple(
+        self, data: dict, url_to_local: dict
+    ) -> dict:
+        """Replace URLs with local paths for simplified format only"""
+        updated_data = data.copy()
+
+        # Handle images - direct string URLs only
+        if "images" in updated_data:
+            updated_images = []
+            for img in updated_data["images"]:
+                if isinstance(img, str) and img in url_to_local:
+                    updated_images.append(url_to_local[img])
+                else:
+                    updated_images.append(img)
+            updated_data["images"] = updated_images
+
+        # Handle audio URLs - direct replacement only
+        for key in ["voice_over", "background_music"]:
+            if key in updated_data and isinstance(updated_data[key], str):
+                if updated_data[key] in url_to_local:
+                    updated_data[key] = url_to_local[updated_data[key]]
+
+        return updated_data
+
     async def _process_video_batch(
         self, input_data: list, output_path: str, tmp_dir: str
     ):
         """Process video batch using existing create_video functions"""
         # Import here to avoid circular imports
         from create_video import process_single_cut
-        from utils.validation_utils import (
-            batch_download_urls,
-            replace_url_with_local_path,
-        )
+        from utils.validation_utils import batch_download_urls
         from utils.video_utils import concatenate_videos_with_sequence
 
         temp_files = []
@@ -187,11 +236,18 @@ class VideoService:
             # Download URLs if needed
             url_list = []
             for data in input_data:
+                # Handle images - direct URL strings only
                 for img in data["images"]:
-                    if img.get("is_url"):
-                        url_list.append(img["path"])
+                    if isinstance(img, str) and img.startswith(("http://", "https://")):
+                        url_list.append(img)
+
+                # Handle audio URLs - direct URL detection only
                 for key in ["voice_over", "background_music"]:
-                    if data.get(f"{key}_is_url"):
+                    if (
+                        key in data
+                        and isinstance(data[key], str)
+                        and data[key].startswith(("http://", "https://"))
+                    ):
                         url_list.append(data[key])
 
             if url_list:
@@ -206,7 +262,7 @@ class VideoService:
 
                 # Replace URLs with local paths
                 input_data = [
-                    replace_url_with_local_path(data, url_to_local)
+                    self._replace_urls_with_local_paths_simple(data, url_to_local)
                     for data in input_data
                 ]
 
@@ -214,7 +270,11 @@ class VideoService:
             temp_video_paths = []
             for idx, data in enumerate(input_data):
                 cut_id = data.get("id") or f"cut{idx+1}"
-                video_path = process_single_cut(data, tmp_dir, cut_id)
+
+                # Convert to old format for process_single_cut compatibility
+                converted_data = self._convert_to_simple_format(data)
+
+                video_path = process_single_cut(converted_data, tmp_dir, cut_id)
                 temp_video_paths.append(video_path)
                 temp_files.append(video_path)
 
@@ -369,4 +429,4 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8002, log_level="info")

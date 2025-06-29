@@ -201,7 +201,7 @@ def concatenate_videos_with_sequence(
     if transitions is None:
         transitions = []
     if len(transitions) < len(clips) - 1:
-        transitions.extend([None] * (len(clips) - 1 - len(transitions)))
+        transitions.extend([{}] * (len(clips) - 1 - len(transitions)))
 
     # If any transition is 'crossfade', the entire sequence must be a CompositeVideoClip
     if any(t and t.get("type") == "crossfade" for t in transitions):

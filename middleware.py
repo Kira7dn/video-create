@@ -22,8 +22,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.clients = defaultdict(deque)
 
     async def dispatch(self, request: Request, call_next):
-        # Get client IP
-        client_ip = request.client.host
+        # Get client IP, fallback to 'unknown' if not available
+        client_ip = request.client.host if request.client is not None else "unknown"
 
         # Skip rate limiting for health checks
         if request.url.path in ["/health", "/", "/docs", "/openapi.json"]:
@@ -81,9 +81,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
 
         # Log request
-        logger.info(
-            f"Request: {request.method} {request.url.path} from {request.client.host}"
-        )
+        client_host = request.client.host if request.client is not None else "unknown"
+        logger.info(f"Request: {request.method} {request.url.path} from {client_host}")
 
         # Process request
         response = await call_next(request)

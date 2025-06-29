@@ -33,7 +33,7 @@ python create_video.py --input input_sample.json --output final_output.mp4 --tmp
 - `--transitions`: (Optional) JSON file or string specifying transitions between cuts
 - `--tmp-dir`: (Optional) Temp dir for downloads and intermediate files (default: `tmp_pipeline`)
 
-## Input JSON Format
+## Input JSON Format (Simplified)
 
 The input file must be a JSON array, where each object describes a video cut. Example:
 
@@ -42,12 +42,26 @@ The input file must be a JSON array, where each object describes a video cut. Ex
   {
     "id": "intro",
     "images": [
-      {
-        "path": "https://example.com/image1.jpg",
-        "is_url": true
-      }
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
     ],
     "voice_over": "https://example.com/voice.mp3",
+    "background_music": "https://example.com/background.mp3",
+    "transition": {
+      "type": "fadeblack", 
+      "duration": 1.0
+    }
+  }
+]
+```
+
+**Key features:**
+- **images**: Array of URL strings (auto-downloaded)
+- **voice_over**: Direct URL string to audio file  
+- **background_music**: Direct URL string to audio file
+- **transition**: Optional transition configuration
+
+For complete format documentation, see [SIMPLIFIED_FORMAT.md](SIMPLIFIED_FORMAT.md).
     "voice_over_is_url": true,
     "background_music": "https://example.com/music.mp3",
     "background_music_is_url": true

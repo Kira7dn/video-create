@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import traceback
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class VideoProcessingError(Exception):
     """Custom exception for video processing errors"""
 
-    def __init__(self, message: str, error_code: str = None):
+    def __init__(self, message: str, error_code: "Optional[str]" = None):
         self.message = message
         self.error_code = error_code
         super().__init__(self.message)
@@ -24,14 +25,14 @@ class VideoProcessingError(Exception):
 class VideoCreationError(VideoProcessingError):
     """Custom exception for video creation errors"""
 
-    def __init__(self, message: str, error_code: str = None):
+    def __init__(self, message: str, error_code: Optional[str] = None):
         super().__init__(message, error_code)
 
 
 class FileValidationError(Exception):
     """Custom exception for file validation errors"""
 
-    def __init__(self, message: str, file_name: str = None):
+    def __init__(self, message: str, file_name: Optional[str] = None):
         self.message = message
         self.file_name = file_name
         super().__init__(self.message)

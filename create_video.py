@@ -17,7 +17,8 @@ from moviepy import (
     TextClip,
     CompositeAudioClip,
 )
-from pydub import AudioSegment
+import soundfile as sf
+import numpy as np
 from gtts import gTTS
 import shutil
 from urllib.parse import urlparse
@@ -232,6 +233,7 @@ async def create_video_from_json(
 
 def process_single_cut(data, tmp_dir, cut_id=None):
     from moviepy.audio.io.AudioFileClip import AudioFileClip
+    from utils.audio_utils import save_audio_to_file
     import uuid
 
     cut_id = cut_id or data.get("id") or str(uuid.uuid4())
@@ -246,11 +248,13 @@ def process_single_cut(data, tmp_dir, cut_id=None):
         # 2. Process audio
         voice_seg = load_audio_file(data["voice_over"])
         bgm_seg = load_audio_file(data["background_music"])
-        bgm_seg = manage_audio_duration(bgm_seg, len(voice_seg))
+        bgm_seg = manage_audio_duration(bgm_seg, voice_seg["duration_ms"])
         mixed_seg = mix_audio(voice_seg, bgm_seg, bgm_gain_when_voice=-15)
+
         temp_mixed_path = os.path.join(tmp_dir, f"temp_mixed_audio_{cut_id}.mp3")
-        mixed_seg.export(temp_mixed_path, format="mp3")
+        save_audio_to_file(mixed_seg, temp_mixed_path, format="mp3")
         temp_files.append(temp_mixed_path)
+
         mixed_audio = AudioFileClip(temp_mixed_path)
         total_audio_duration_sec = mixed_audio.duration
         fps = 24

@@ -23,11 +23,78 @@ node_modules/
 
 # OS specific
 .DS_Store
+Thumbs.db
 
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# Temporary files and directories
 tmp*/
+temp/
+*.tmp
+*.temp
 
+# Test files and outputs
+test/
+*_test.py
+test_*.py
+*_test_*.py
+result/
+*.mp4
+*.mp3
+*.wav
+*.avi
+*.mov
+*.mkv
+
+# Development and documentation files
 .roomodes
 .windsurfrules
-test/
 .taskmaster/
-.venv/
+.cursor/
+.roo/
+*MIGRATION*.md
+*AUDIO_MIGRATION*.md
+moviepy.md
+moviepy_transition_example.py
+moviepy_transitions_enum.json
+
+# Sample and example files
+input_sample*.json
+*_sample.*
+*_example.*
+
+# Development scripts
+test_*.py
+*_test.py
+
+# Build and deployment
+docker_test_output.mp4
+*.pyc
