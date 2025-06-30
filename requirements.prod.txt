@@ -1,0 +1,38 @@
+# Production Requirements - Optimized for deployment
+# Core FastAPI
+fastapi==0.115.13
+uvicorn[standard]==0.34.3
+pydantic==2.11.7
+pydantic-settings==2.10.1
+starlette==0.46.2
+
+# File handling
+python-multipart==0.0.20
+aiofiles==23.2.0
+
+# HTTP requests
+requests==2.32.4
+aiohttp==3.9.5
+
+# Video processing (core)
+moviepy==2.2.1
+opencv-python==4.11.0.86
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+pillow==11.2.1
+
+# Audio processing
+soundfile>=0.12.1
+gtts==2.5.1
+
+# System utilities
+python-dotenv==1.1.0
+psutil==5.9.8
+
+# Scientific computing (minimal)
+numpy==2.3.0
+
+# Production extras
+gunicorn==21.2.0  # Alternative ASGI server
+prometheus-client==0.17.1  # Metrics
+structlog==23.2.0  # Better logging

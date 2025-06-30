@@ -1,11 +1,12 @@
+# Development Requirements - Full featured
 fastapi==0.115.13
-uvicorn==0.34.3
+uvicorn[standard]==0.34.3
 pydantic==2.11.7
 python-multipart==0.0.20
 requests==2.32.4
 moviepy==2.2.1
 python-dotenv==1.1.0
-opencv-python==4.11.0.86
+opencv-python==4.11.0.86  # Heavy lib for dev/testing
 numpy==2.3.0
 soundfile>=0.12.1
 psutil==5.9.8
@@ -17,6 +18,11 @@ pillow==11.2.1
 aiohttp==3.9.5
 aiofiles==23.2.0
 gtts==2.5.1
-pytest==8.4.1
 
-# System dependencies (not installable via pip): ffmpeg
+# Development tools
+pytest==8.4.1
+pytest-asyncio==0.23.2
+black==23.12.1
+flake8==6.1.0
+mypy==1.8.0
+httpx==0.26.0  # For testing async requests

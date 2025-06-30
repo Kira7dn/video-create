@@ -3,7 +3,8 @@ Application configuration using Pydantic Settings
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import field_validator
+from typing import Optional, List, Union
 import os
 
 
@@ -30,10 +31,22 @@ class Settings(BaseSettings):
     cleanup_temp_files: bool = True
 
     # CORS Settings
-    cors_origins: list = ["http://localhost:3000", "http://localhost:8080"]
+    cors_origins: Union[List[str], str] = [
+        "http://localhost:3000",
+        "http://localhost:8080",
+    ]
     cors_allow_credentials: bool = True
     cors_allow_methods: list = ["GET", "POST"]
     cors_allow_headers: list = ["*"]
+
+    @field_validator("cors_origins")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            if v == "*":
+                return ["*"]
+            return [origin.strip() for origin in v.split(",")]
+        return v
 
     # Logging Settings
     log_level: str = "INFO"
@@ -49,6 +62,10 @@ class Settings(BaseSettings):
     # Security Settings
     request_timeout: int = 300  # 5 minutes
     max_concurrent_requests: int = 10
+
+    # Ngrok Settings
+    ngrok_authtoken: str = ""
+    ngrok_url: str = ""
 
     class Config:
         env_file = ".env"
