@@ -148,6 +148,7 @@ console.log('Video URL:', result.video_url);
 | [**USAGE_GUIDE.md**](USAGE_GUIDE.md) | 📖 Complete usage guide |
 | [**API_DOCUMENTATION.md**](API_DOCUMENTATION.md) | 📡 API endpoints và examples |
 | [**DOCKER_README.md**](DOCKER_README.md) | 🐳 Docker deployment guide |
+| [**WSL_DEPLOYMENT.md**](WSL_DEPLOYMENT.md) | 🐧 WSL production deployment |
 | [**REFACTORING_GUIDE.md**](REFACTORING_GUIDE.md) | 🔧 Architecture overview |
 
 ## 🛠️ Management Commands
@@ -175,7 +176,7 @@ make backup         # Backup data
 
 ## 🌐 Production Deployment
 
-### 1. Server Setup
+### Standard Linux Server
 
 ```bash
 # Install Docker
@@ -186,6 +187,26 @@ sudo sh get-docker.sh
 git clone <repository-url>
 cd video-create
 ```
+
+### WSL2 (Windows Subsystem for Linux)
+
+```bash
+# Install WSL2 and Ubuntu
+wsl --install -d Ubuntu-22.04
+
+# Setup in WSL
+git clone <repository-url>
+cd video-create
+make deploy-prod
+```
+
+**Benefits of WSL:**
+- ✅ Near-native Linux performance
+- ✅ Windows integration
+- ✅ Cost-effective (single Windows license)
+- ✅ Easy backup and restore
+
+See [**WSL_DEPLOYMENT.md**](WSL_DEPLOYMENT.md) for complete WSL setup guide.
 
 ### 2. Domain Configuration
 

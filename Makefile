@@ -1,7 +1,7 @@
 # Makefile for Video Creation API
 # Usage: make <target>
 
-.PHONY: help setup build up down logs clean dev prod test
+.PHONY: help setup build up down logs clean dev prod test wsl-start wsl-stop wsl-status
 
 # Default target
 help:
@@ -19,6 +19,13 @@ help:
 	@echo "  test      - Run tests in container"
 	@echo "  shell     - Open shell in running container"
 	@echo "  health    - Check service health"
+	@echo ""
+	@echo "WSL Management (Windows only):"
+	@echo "  wsl-start  - Start Video API on WSL"
+	@echo "  wsl-stop   - Stop Video API on WSL"
+	@echo "  wsl-status - Show WSL status"
+	@echo "  wsl-health - Run WSL health check"
+	@echo "  wsl-logs   - Show WSL logs"
 
 # Setup directories and environment
 setup:
@@ -104,3 +111,52 @@ info:
 	@echo ""
 	@echo "=== Volume Information ==="
 	@docker volume ls | grep video-create
+
+# WSL Management Commands (Windows only)
+wsl-start:
+	@echo "Starting Video API on WSL..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 start; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
+
+wsl-stop:
+	@echo "Stopping Video API on WSL..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 stop; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
+
+wsl-status:
+	@echo "Checking WSL status..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 status; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
+
+wsl-health:
+	@echo "Running WSL health check..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 health; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
+
+wsl-logs:
+	@echo "Showing WSL logs..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 logs; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
+
+wsl-restart:
+	@echo "Restarting Video API on WSL..."
+	@if command -v powershell >/dev/null 2>&1; then \
+		powershell -ExecutionPolicy Bypass -File manage-wsl.ps1 restart; \
+	else \
+		echo "❌ PowerShell not available. WSL commands require Windows."; \
+	fi
