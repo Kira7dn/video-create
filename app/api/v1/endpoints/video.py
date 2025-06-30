@@ -20,7 +20,7 @@ from app.models.responses import (
     UploadResponse,
     CutResult,
 )
-from app.services.video_service import video_service
+from app.services.video_service_v2 import video_service_v2
 from app.core.exceptions import VideoCreationError, FileValidationError
 from app.config.settings import settings
 
@@ -89,7 +89,7 @@ async def create_video(
             )
 
         # Create video using service
-        output_path = await video_service.create_video_from_json(json_data)
+        output_path = await video_service_v2.create_video_from_json(json_data)
 
         # Get file information
         file_size = (
@@ -99,7 +99,7 @@ async def create_video(
 
         # Schedule cleanup in background
         background_tasks.add_task(
-            video_service.cleanup_temp_directory, os.path.dirname(output_path)
+            video_service_v2.cleanup_temp_directory, os.path.dirname(output_path)
         )
 
         return VideoCreationResponse(
@@ -181,7 +181,7 @@ async def create_batch_video(
             )
 
         # Process batch video creation, truyền batch_uuid vào để dùng cho tên file output
-        output_path, cut_results = await video_service.process_batch_video_creation(
+        output_path, cut_results = await video_service_v2.process_batch_video_creation(
             json_data, tmp_dir=temp_dir, batch_uuid=batch_uuid
         )
 
@@ -194,7 +194,7 @@ async def create_batch_video(
         processing_time = time.time() - start_time
 
         # Schedule cleanup in background
-        background_tasks.add_task(video_service.cleanup_temp_directory, temp_dir)
+        background_tasks.add_task(video_service_v2.cleanup_temp_directory, temp_dir)
 
         return BatchVideoResponse(
             success=successful_cuts > 0,
@@ -349,7 +349,7 @@ async def download_video(filename: str):
         # Cleanup temp directory if exists
         if temp_dir and temp_dir != ".":
             logger.info(f"📋 Cleanup after download for: {temp_dir}")
-            video_service.cleanup_temp_directory(temp_dir)
+            video_service_v2.cleanup_temp_directory(temp_dir)
 
     def generate_file():
         """Generator to read file and ensure it's properly closed"""
