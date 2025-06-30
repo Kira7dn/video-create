@@ -33,7 +33,7 @@ class VideoConfig:
     cleanup_retry_attempts: int = 3
     cleanup_retry_delay: float = 2.0
     delayed_cleanup_delay: float = 30.0
-    old_temp_cleanup_age_hours: float = 24.0
+    old_temp_cleanup_age_hours: float = 1.0
 
     # Download settings
     download_timeout: int = 30

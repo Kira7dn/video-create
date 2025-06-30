@@ -122,7 +122,6 @@ async def managed_temp_directory(prefix: Optional[str] = None) -> AsyncIterator[
 async def _cleanup_temp_directory_async(temp_dir: str):
     """Async cleanup for temporary directories with retries"""
     import asyncio
-    import platform
 
     try:
         if not os.path.exists(temp_dir):
@@ -133,32 +132,9 @@ async def _cleanup_temp_directory_async(temp_dir: str):
             gc.collect()
             await asyncio.sleep(video_config.file_handle_release_delay)
 
-        # Windows-specific handling with retries
-        if platform.system() == "Windows":
-            for attempt in range(video_config.cleanup_retry_attempts):
-                try:
-                    shutil.rmtree(temp_dir)
-                    logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
-                    return
-                except PermissionError as e:
-                    if attempt < video_config.cleanup_retry_attempts - 1:
-                        logger.warning(
-                            f"⚠️ Temp directory cleanup attempt {attempt + 1} failed, retrying: {e}"
-                        )
-                        await asyncio.sleep(video_config.cleanup_retry_delay)
-                        gc.collect()
-                    else:
-                        logger.warning(
-                            f"❌ Failed to cleanup temp directory {temp_dir} after {video_config.cleanup_retry_attempts} attempts"
-                        )
-                        # Schedule delayed cleanup as fallback
-                        ResourceManager()._schedule_delayed_cleanup(
-                            temp_dir, delay_seconds=60.0
-                        )
-        else:
-            # Non-Windows systems
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
+        # Non-Windows systems
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
 
     except Exception as e:
         logger.warning(f"❌ Failed to clean up temp directory {temp_dir}: {e}")

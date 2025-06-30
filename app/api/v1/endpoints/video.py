@@ -97,15 +97,15 @@ async def create_video(
         )
         processing_time = time.time() - start_time
 
-        # Schedule cleanup in background
-        background_tasks.add_task(
-            video_service_v2.cleanup_temp_directory, os.path.dirname(output_path)
-        )
+        # Ensure ngrok_url has protocol
+        ngrok_url = settings.ngrok_url
+        if not ngrok_url.startswith("http://") and not ngrok_url.startswith("https://"):
+            ngrok_url = f"https://{ngrok_url}"
 
         return VideoCreationResponse(
             success=True,
             video_id=video_id,
-            download_url=f"/api/v1/video/download/{os.path.basename(output_path)}",
+            download_url=f"{ngrok_url}/api/v1/video/download/{os.path.basename(output_path)}",
             file_size=file_size,
             duration=None,  # TODO: Extract video duration
             processing_time=processing_time,
@@ -134,111 +134,6 @@ async def create_video(
         )
 
 
-@router.post("/batch", response_model=BatchVideoResponse)
-async def create_batch_video(
-    file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()
-):
-    """
-    Create a video from batch of cuts in uploaded JSON file
-
-    - **file**: JSON file containing array of video cuts
-    """
-    start_time = time.time()
-    batch_uuid = uuid.uuid4().hex
-    temp_dir = f"tmp_batch_{batch_uuid}"
-
-    try:
-        # Validate uploaded file
-        await validate_upload_file(file)
-
-        # Read and parse JSON content
-        content = await file.read()
-        try:
-            json_data = json.loads(content.decode("utf-8"))
-        except json.JSONDecodeError as e:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "Invalid JSON format", "details": str(e)},
-            )
-
-        # Validate JSON structure
-        if not isinstance(json_data, list):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "Invalid format",
-                    "details": "JSON must be an array of cuts",
-                },
-            )
-
-        if len(json_data) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "Empty input",
-                    "details": "JSON array cannot be empty",
-                },
-            )
-
-        # Process batch video creation, truyền batch_uuid vào để dùng cho tên file output
-        output_path, cut_results = await video_service_v2.process_batch_video_creation(
-            json_data, tmp_dir=temp_dir, batch_uuid=batch_uuid
-        )
-
-        # Calculate statistics
-        total_cuts = len(cut_results)
-        successful_cuts = sum(
-            1 for result in cut_results if result["status"] == "success"
-        )
-        failed_cuts = total_cuts - successful_cuts
-        processing_time = time.time() - start_time
-
-        # Schedule cleanup in background
-        background_tasks.add_task(video_service_v2.cleanup_temp_directory, temp_dir)
-
-        return BatchVideoResponse(
-            success=successful_cuts > 0,
-            final_video_url=(
-                f"/api/v1/video/download/{os.path.basename(output_path)}"
-                if successful_cuts > 0
-                else None
-            ),
-            total_cuts=total_cuts,
-            successful_cuts=successful_cuts,
-            failed_cuts=failed_cuts,
-            cut_results=[
-                CutResult(
-                    id=result["id"],
-                    status=result["status"],
-                    video_path=result["video_path"],
-                    error=result["error"],
-                    processing_time=None,  # TODO: Track individual cut processing time
-                )
-                for result in cut_results
-            ],
-            total_processing_time=processing_time,
-        )
-
-    except FileValidationError as e:
-        logger.warning(f"File validation error: {e.message}")
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "File validation failed", "details": e.message},
-        )
-    except VideoCreationError as e:
-        logger.error(f"Batch video creation error: {e.message}")
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "Batch video creation failed", "details": e.message},
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in batch video creation: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "Unexpected error", "details": str(e)},
-        )
-
-
 @router.get("/download/{filename}")
 async def download_video(filename: str):
     """
@@ -258,13 +153,7 @@ async def download_video(filename: str):
 
     # Look for file in common temp directories
     # Extract UUID from filename pattern: final_batch_video_{uuid}.mp4 or final_video_{uuid}.mp4
-    if filename.startswith("final_batch_video_"):
-        uuid_part = filename.replace("final_batch_video_", "").replace(".mp4", "")
-        possible_paths = [
-            os.path.join(f"tmp_batch_{uuid_part}", filename),
-            filename,  # Direct path
-        ]
-    elif filename.startswith("final_video_"):
+    if filename.startswith("final_video_"):
         uuid_part = filename.replace("final_video_", "").replace(".mp4", "")
         possible_paths = [
             os.path.join(f"tmp_create_{uuid_part}", filename),
@@ -276,12 +165,8 @@ async def download_video(filename: str):
             os.path.join(
                 f"tmp_create_{filename.split('_')[2].split('.')[0]}", filename
             ),
-            os.path.join(f"tmp_batch_{filename.split('_')[2].split('.')[0]}", filename),
             filename,  # Direct path
         ]
-
-    logger.info(f"[DOWNLOAD] Looking for file: {filename}")
-    logger.info(f"[DOWNLOAD] Possible paths: {possible_paths}")
 
     file_path = None
     temp_dir = None
@@ -310,19 +195,14 @@ async def download_video(filename: str):
         import platform
 
         # Wait longer on Windows to ensure file handles are fully released
-        wait_time = 5.0 if platform.system() == "Windows" else 2.0
+        wait_time = 2.0
         time.sleep(wait_time)
         gc.collect()
-
-        # Additional wait and force garbage collection for Windows
-        if platform.system() == "Windows":
-            time.sleep(2.0)
-            gc.collect()
 
         # Cleanup output file in root directory with retry
         if file_path and os.path.exists(file_path) and not os.path.dirname(file_path):
             # Only cleanup files in root directory (final_video_*.mp4)
-            cleanup_attempts = 5  # More attempts for Windows
+            cleanup_attempts = 2  # More attempts for Windows
             for attempt in range(cleanup_attempts):
                 try:
                     # Force close any potential file handles before removal
@@ -332,7 +212,7 @@ async def download_video(filename: str):
                     break
                 except PermissionError as e:
                     if attempt < cleanup_attempts - 1:
-                        wait_retry = 5.0 if platform.system() == "Windows" else 3.0
+                        wait_retry = 3.0
                         logger.warning(
                             f"⚠️ Output file cleanup attempt {attempt + 1} failed, retrying in {wait_retry}s: {e}"
                         )
