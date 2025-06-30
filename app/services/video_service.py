@@ -168,11 +168,11 @@ class VideoCreationService:
         self,
         segment: dict,
         temp_dir: str,
-        start_delay: float = 1.0,
-        end_delay: float = 1.0,
     ) -> VideoFileClip:
         """Creates a video clip from a processed segment dictionary."""
-        segment_type = segment.get("type")
+        start_delay = segment.get("start_delay", 0.5)
+        end_delay = segment.get("end_delay", 0.5)
+
         duration = segment["duration"]  # Duration is always set in _process_segment
         bg_image_path = segment.get("background_image_path")
 
@@ -261,7 +261,7 @@ class VideoCreationService:
         final_clip = final_clip.with_fps(24)
 
         # Use a unique identifier for the segment output filename
-        segment_id = segment.get("id") or segment_type or str(uuid.uuid4())
+        segment_id = segment.get("id") or str(uuid.uuid4())
         segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
         export_final_video_clip(final_clip, segment_output_path)
 
