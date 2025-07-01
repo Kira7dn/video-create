@@ -526,4 +526,4 @@ Follow WINDSURF_RULES for proper rule formatting and structure of windsurf rule 
 
 ## OTHER_RULES
 
-When calling check_ai_script_hallucinations with a path starting with "C:\Workspace\", convert the path to the "/workspace/" format instead.
+When calling check_ai_script_hallucinations with a path starting with "C:\Workspace\", convert the path to the "/workspace/" format instead. Example: "C:\Workspace\video-create\app\main.py" becomes "/workspace/video-create/app/main.py".

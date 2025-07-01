@@ -3,6 +3,7 @@ Professional Video Creation API - Production Ready Implementation
 """
 
 import logging
+from logging.handlers import RotatingFileHandler
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -27,11 +28,18 @@ from app.core.middleware import (
 )
 from app.api.v1.router import router as api_v1_router
 
-# Configure logging
+# Configure logging: both to console and to file
+log_handlers = [
+    logging.StreamHandler(),
+    RotatingFileHandler(
+        "app.log", maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
+    ),
+]
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
     format=settings.log_format,
     datefmt=settings.log_date_format,
+    handlers=log_handlers,
 )
 
 logger = logging.getLogger(__name__)
