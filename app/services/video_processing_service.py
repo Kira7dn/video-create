@@ -144,9 +144,32 @@ class VideoProcessingService:
             if not bg_image_path or not os.path.exists(bg_image_path):
                 raise VideoCreationError("Background image not found for segment")
 
-            # Create base video clip
+            # Process image with padding for consistent size
+            from utils.image_utils import process_images_with_padding
+
+            processed_paths = process_images_with_padding(
+                image_paths=bg_image_path,
+                target_size=(1920, 1080),  # Standard HD size
+                smart_pad_color=True,  # Enable smart padding color detection
+                pad_color_method="average_edge",  # Use average edge method
+                auto_enhance=True,  # Enable auto image enhancement
+                enhance_brightness=True,  # Auto brightness adjustment
+                enhance_contrast=True,  # Auto contrast enhancement
+                enhance_saturation=True,  # Auto saturation optimization
+                output_dir=temp_dir,
+            )
+
+            if not processed_paths:
+                raise VideoCreationError("Failed to process background image")
+
+            processed_bg_path = processed_paths[0]
+
+            # Track processed file for cleanup
+            self.resource_manager.track_file(processed_bg_path)
+
+            # Create base video clip with processed image
             base_clip = self.resource_manager.track_clip(
-                ImageClip(bg_image_path, duration=apply_duration)
+                ImageClip(processed_bg_path, duration=apply_duration)
             )
 
             # Add text overlays
