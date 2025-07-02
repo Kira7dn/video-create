@@ -32,7 +32,7 @@ from app.api.v1.router import router as api_v1_router
 log_handlers = [
     logging.StreamHandler(),
     RotatingFileHandler(
-        "app.log", maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
+        "data/app.log", maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
     ),
 ]
 logging.basicConfig(

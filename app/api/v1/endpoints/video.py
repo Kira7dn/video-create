@@ -7,6 +7,8 @@ import uuid
 import time
 import json
 import logging
+import threading
+from filelock import FileLock
 from typing import Optional
 from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse, StreamingResponse
@@ -26,6 +28,28 @@ from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/video", tags=["video"])
+
+# Global job store and lock for thread safety
+JOB_STORE_PATH = os.path.join("data", "job_store.json")
+JOB_STORE_LOCK_PATH = os.path.join("data", "job_store.json.lock")
+
+
+def load_job_store():
+    if not os.path.exists(JOB_STORE_PATH):
+        return {}
+    with FileLock(JOB_STORE_LOCK_PATH, timeout=5):
+        with open(JOB_STORE_PATH, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+
+
+def save_job_store(job_store):
+    os.makedirs(os.path.dirname(JOB_STORE_PATH), exist_ok=True)
+    with FileLock(JOB_STORE_LOCK_PATH, timeout=5):
+        with open(JOB_STORE_PATH, "w", encoding="utf-8") as f:
+            json.dump(job_store, f)
 
 
 async def validate_upload_file(file: UploadFile) -> None:
@@ -51,87 +75,64 @@ async def validate_upload_file(file: UploadFile) -> None:
         )
 
 
-@router.post("/create", response_model=VideoCreationResponse)
+@router.post("/create", response_model=dict)
 async def create_video(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
-    Create a video from uploaded JSON configuration
-
-    - **file**: JSON file containing video configuration
+    Create a video from uploaded JSON configuration (async job)
+    Returns: {"job_id": ...}
     """
-    start_time = time.time()
-    video_id = str(uuid.uuid4())
+    job_id = str(uuid.uuid4())
+    content = await file.read()
+    filename = file.filename
+    job_store = load_job_store()
+    job_store[job_id] = {"status": "pending", "result": None, "error": None}
+    save_job_store(job_store)
 
-    try:
-        # Validate uploaded file
-        await validate_upload_file(file)
-
-        # Read and parse JSON content
-        content = await file.read()
+    async def process_job(content, filename):
         try:
+            # Validate file (filename, extension, size)
+            allowed_extensions = settings.allowed_extensions
+            if not filename:
+                raise FileValidationError("No filename provided", filename or "")
+            if not any(filename.endswith(ext) for ext in allowed_extensions):
+                raise FileValidationError(
+                    f"Invalid file format. Allowed: {', '.join(allowed_extensions)}",
+                    filename,
+                )
+            if len(content) > settings.max_file_size:
+                raise FileValidationError(
+                    f"File too large. Max size: {settings.max_file_size} bytes",
+                    filename,
+                )
+            # Parse JSON
             json_data = json.loads(content.decode("utf-8"))
-        except json.JSONDecodeError as e:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": "Invalid JSON format", "details": str(e)},
-            )
+            if not isinstance(json_data, list):
+                raise ValueError("JSON must be an array of segments")
+            output_path = await video_service_v2.create_video_from_json(json_data)
+            job_store = load_job_store()
+            job_store[job_id]["status"] = "done"
+            job_store[job_id]["result"] = output_path
+            save_job_store(job_store)
+        except Exception as e:
+            job_store = load_job_store()
+            job_store[job_id]["status"] = "failed"
+            job_store[job_id]["error"] = str(e)
+            save_job_store(job_store)
 
-        # Validate JSON structure
-        if not isinstance(json_data, list):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "Invalid format",
-                    "details": "JSON must be an array of segments",
-                },
-            )
+    background_tasks.add_task(process_job, content, filename)
+    return {"job_id": job_id}
 
-        # Create video using service
-        output_path = await video_service_v2.create_video_from_json(json_data)
 
-        # Get file information
-        file_size = (
-            os.path.getsize(output_path) if os.path.exists(output_path) else None
-        )
-        processing_time = time.time() - start_time
-
-        # Ensure ngrok_url has protocol
-        ngrok_url = settings.ngrok_url
-        if not ngrok_url.startswith("http://") and not ngrok_url.startswith("https://"):
-            ngrok_url = f"https://{ngrok_url}"
-
-        return VideoCreationResponse(
-            success=True,
-            video_id=video_id,
-            download_url=f"{ngrok_url}/api/v1/video/download/{os.path.basename(output_path)}",
-            file_size=file_size,
-            duration=None,  # TODO: Extract video duration
-            processing_time=processing_time,
-        )
-
-    except FileValidationError as e:
-        logger.warning(f"File validation error: {e.message}")
-        raise HTTPException(
-            status_code=400,
-            detail={"error": "File validation failed", "details": e.message},
-        )
-    except VideoCreationError as e:
-        logger.error(f"Video creation error: {e.message}")
-        raise HTTPException(
-            status_code=500,
-            detail={"error": "Video creation failed", "details": e.message},
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in video creation: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Internal server error",
-                "details": "An unexpected error occurred",
-            },
-        )
+@router.get("/status/{job_id}")
+async def get_job_status(job_id: str):
+    job_store = load_job_store()
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail={"error": "Job not found"})
+    return job
 
 
 @router.get("/download/{filename}")

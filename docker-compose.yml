@@ -10,9 +10,8 @@ services:
     environment:
       - CORS_ORIGINS=*
     volumes:
-      - ./:/app # Mount toàn bộ project folder, bao gồm cả app.log
-      - ./data:/app/data
-      - ./test:/app/test
+      - ./data:/app/data # Chỉ mount thư mục data, log sẽ nằm trong đây
+      - ./test:/app/test # Mount thư mục test để có thể truy cập test files
     networks:
       - app_network
 
