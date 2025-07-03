@@ -21,7 +21,7 @@ class VideoConfig:
     default_end_delay: float = 0.5
 
     # Audio settings
-    background_music_volume: float = 0.2
+    background_music_volume: float = 0.1
     default_audio_fps: int = 44100
 
     # Text settings

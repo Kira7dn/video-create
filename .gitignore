@@ -94,3 +94,5 @@ input_sample*.json
 # Build and deployment
 docker_test_output.mp4
 *.pyc
+
+data/

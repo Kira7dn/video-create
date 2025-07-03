@@ -5,6 +5,7 @@ Video processing service for creating video clips from segments
 import os
 import uuid
 import logging
+import gc
 import numpy as np
 from typing import List, Dict, Optional, Any
 
@@ -213,48 +214,61 @@ class VideoProcessingService:
 
     def create_multiple_segment_clips(
         self, segments: List[Dict], temp_dir: str
-    ) -> List[VideoFileClip]:
-        """Create multiple segment clips"""
-        clips = []
+    ) -> List[str]:
+        """Create multiple segment clips and return file paths"""
+        clip_paths = []
 
         for i, segment in enumerate(segments):
             try:
                 clip = self.create_segment_clip(segment, temp_dir)
-                clips.append(clip)
-                logger.info(f"✅ Created segment {i+1}/{len(segments)}")
+                # Get the file path before closing
+                clip_path = clip.filename
+                clip_paths.append(clip_path)
+
+                # Close the clip immediately to free memory
+                clip.close()
+
+                # Force garbage collection to ensure memory is freed
+                gc.collect()
+
+                logger.info(
+                    f"✅ Created and closed segment {i+1}/{len(segments)}: {clip_path}"
+                )
             except Exception as e:
                 logger.error(f"❌ Failed to create segment {i+1}: {e}")
-                # Clean up successful clips before re-raising
-                for clip in clips:
-                    try:
-                        clip.close()
-                    except:
-                        pass
+                # No need to clean up clips since we close them immediately
                 raise
 
-        return clips
+        return clip_paths
 
-    def concatenate_clips_with_transitions(
-        self, clip_paths: List[str], transitions: Optional[List[Any]] = None
+    def concatenate_clips(
+        self, clip_paths: List[str], output_path: str
     ) -> Any:
-        """Concatenate video clips with optional transitions"""
-        from utils.video_utils import concatenate_videos_with_sequence
+        """Concatenate video clips using ffmpeg only. Transitions are not supported."""
+        from utils.video_utils import ffmpeg_concat_videos
+        import psutil
 
         try:
             if not clip_paths:
                 raise VideoCreationError("No clip paths provided for concatenation")
 
-            # Use utility function for concatenation with transitions
-            final_clip = concatenate_videos_with_sequence(
-                clip_paths, transitions=transitions
+            # Log memory usage before concatenation
+            memory = psutil.virtual_memory()
+            logger.info(
+                f"Memory usage before concatenation: {memory.percent:.1f}% ({memory.used // 1024 // 1024} MB used)"
             )
 
-            # Ensure we have a valid video clip (VideoFileClip, CompositeVideoClip, or VideoClip)
-            if final_clip is not None:
-                self.resource_manager.track_clip(final_clip)
-                return final_clip
-            else:
-                raise VideoCreationError("Concatenation returned None")
+            ffmpeg_concat_videos(clip_paths, output_path, logger=logger)
+            logger.info(f"ffmpeg concat output: {output_path}")
+            # self.resource_manager.track_file(output_path)
+
+            # Log memory usage after concatenation
+            memory_after = psutil.virtual_memory()
+            logger.info(
+                f"Memory usage after concatenation: {memory_after.percent:.1f}% ({memory_after.used // 1024 // 1024} MB used)"
+            )
+
+            return output_path
 
         except Exception as e:
             logger.error(f"Failed to concatenate clips: {e}", exc_info=True)

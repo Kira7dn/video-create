@@ -28,6 +28,7 @@ gtts==2.5.1
 # System utilities
 python-dotenv==1.1.0
 psutil==5.9.8
+filelock==3.13.1
 
 # Scientific computing (minimal)
 numpy==2.3.0

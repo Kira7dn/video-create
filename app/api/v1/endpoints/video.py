@@ -114,7 +114,9 @@ async def create_video(
             output_path = await video_service_v2.create_video_from_json(json_data)
             job_store = load_job_store()
             job_store[job_id]["status"] = "done"
-            job_store[job_id]["result"] = output_path
+            job_store[job_id][
+                "result"
+            ] = f"https://{settings.ngrok_url}/api/v1/video/download/{os.path.basename(output_path)}"
             save_job_store(job_store)
         except Exception as e:
             job_store = load_job_store()
@@ -154,30 +156,19 @@ async def download_video(filename: str):
 
     # Look for file in common temp directories
     # Extract UUID from filename pattern: final_batch_video_{uuid}.mp4 or final_video_{uuid}.mp4
-    if filename.startswith("final_video_"):
-        uuid_part = filename.replace("final_video_", "").replace(".mp4", "")
-        possible_paths = [
-            os.path.join(f"tmp_create_{uuid_part}", filename),
-            filename,  # Direct path
-        ]
-    else:
-        # Fallback to old logic for other filename patterns
-        possible_paths = [
-            os.path.join(
-                f"tmp_create_{filename.split('_')[2].split('.')[0]}", filename
-            ),
-            filename,  # Direct path
-        ]
+    uuid_part = filename.replace("final_video_", "").replace(".mp4", "")
+    possible_paths = [
+        os.path.join(f"tmp_create_{uuid_part}", filename),
+        os.path.join("data", "output", filename),  # Direct path
+    ]
 
     file_path = None
-    temp_dir = None
     for path in possible_paths:
         logger.info(
             f"[DOWNLOAD] Checking path: {path} - exists: {os.path.exists(path)}"
         )
         if os.path.exists(path):
             file_path = path
-            temp_dir = os.path.dirname(path)
             break
 
     if not file_path or not os.path.exists(file_path):
@@ -193,7 +184,6 @@ async def download_video(filename: str):
     def cleanup():
         import time
         import gc
-        import platform
 
         # Wait longer on Windows to ensure file handles are fully released
         wait_time = 2.0
@@ -201,9 +191,8 @@ async def download_video(filename: str):
         gc.collect()
 
         # Cleanup output file in root directory with retry
-        if file_path and os.path.exists(file_path) and not os.path.dirname(file_path):
-            # Only cleanup files in root directory (final_video_*.mp4)
-            cleanup_attempts = 2  # More attempts for Windows
+        if file_path and os.path.exists(file_path):
+            cleanup_attempts = 2
             for attempt in range(cleanup_attempts):
                 try:
                     # Force close any potential file handles before removal
@@ -226,11 +215,6 @@ async def download_video(filename: str):
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to cleanup output file {file_path}: {e}")
                     break
-
-        # Cleanup temp directory if exists
-        if temp_dir and temp_dir != ".":
-            logger.info(f"📋 Cleanup after download for: {temp_dir}")
-            video_service_v2.cleanup_temp_directory(temp_dir)
 
     def generate_file():
         """Generator to read file and ensure it's properly closed"""

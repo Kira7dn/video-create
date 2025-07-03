@@ -67,54 +67,20 @@ class VideoCreationServiceV2:
         with managed_resources() as resource_manager:
             video_processor = VideoProcessingService(resource_manager)
 
-            # Create individual segment clips
-            segment_clips = video_processor.create_multiple_segment_clips(
+            # Create individual segment clips and get file paths
+            clip_paths = video_processor.create_multiple_segment_clips(
                 processed_segments, temp_dir
             )
-
-            # Extract clip paths and transitions
-            clip_paths: List[str] = [
-                clip.filename
-                for clip in segment_clips
-                if hasattr(clip, "filename") and clip.filename is not None
-            ]
-            transitions = [seg.get("transition") for seg in processed_segments]
-
             # Phase 3: Concatenate clips
-            final_clip = video_processor.concatenate_clips_with_transitions(
-                clip_paths, transitions
+            output_path = os.path.join("data", "output", f"final_video_{video_id}.mp4")
+            final_clip_path = video_processor.concatenate_clips(
+                clip_paths, output_path
             )
-
-            # Phase 4: Export final video
-            output_path = os.path.join(temp_dir, f"final_video_{video_id}.mp4")
-            export_final_video_clip(final_clip, output_path)
-
-            # Copy to final output location
-            final_output_path = f"final_video_{video_id}.mp4"
-            if os.path.exists(output_path):
-                shutil.copy2(output_path, final_output_path)
-                logger.info(f"✅ Created video: {final_output_path}")
-                return final_output_path
+            if os.path.exists(final_clip_path):
+                logger.info(f"✅ Created video: {final_clip_path}")
+                return final_clip_path
             else:
                 raise VideoCreationError(f"Output video not found: {output_path}")
-
-    def cleanup_temp_directory(self, temp_dir: str):
-        """Clean up temporary directory - compatibility method for API"""
-        try:
-            if not os.path.exists(temp_dir):
-                logger.info(f"⚠️ Temp directory not found for cleanup: {temp_dir}")
-                return
-
-            # Force garbage collection to release file handles
-            import gc
-
-            gc.collect()
-            # Non-Windows systems
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
-
-        except Exception as e:
-            logger.warning(f"❌ Failed to clean up temp directory {temp_dir}: {e}")
 
     def _merge_segments_with_downloads(
         self, original_segments: List[Dict], download_results: List[Dict[str, str]]
