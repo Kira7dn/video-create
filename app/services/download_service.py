@@ -25,7 +25,7 @@ class DownloadTask:
     url: str
     dest_path: str
     segment_id: str
-    asset_type: str  # 'background_image', 'background_music', 'voice_over'
+    asset_type: str  # 'image','video','background_music', 'voice_over'
 
 
 @dataclass
@@ -91,32 +91,33 @@ class DownloadService:
     def _extract_download_tasks(
         self, segment: dict, temp_dir: str, segment_id: str
     ) -> List[DownloadTask]:
-        """Extract download tasks from a segment"""
+        """Extract download tasks from a segment (trực tiếp lấy .get('url'))"""
         tasks = []
 
-        # Support legacy/simplified format
-        if not segment.get("background_image") and segment.get("images"):
-            images = segment["images"]
-            if isinstance(images, list) and images:
-                segment = segment.copy()
-                segment["background_image"] = images[0]
-
-        # Background image/video
-        if bg_image_url := segment.get("background_image"):
+        # Background image
+        bg_image_url = segment.get("image", {}).get("url")
+        if bg_image_url:
             dest_path = self._generate_download_path(bg_image_url, temp_dir, "bg_image")
             tasks.append(
-                DownloadTask(bg_image_url, dest_path, segment_id, "background_image")
+                DownloadTask(bg_image_url, dest_path, segment_id, "image")
             )
-
+        # Background video
+        bg_video_url = segment.get("video", {}).get("url")
+        if bg_video_url:
+            dest_path = self._generate_download_path(bg_video_url, temp_dir, "video")
+            tasks.append(
+                DownloadTask(bg_video_url, dest_path, segment_id, "video")
+            )
         # Background music
-        if bg_music_url := segment.get("background_music"):
+        bg_music_url = segment.get("background_music", {}).get("url")
+        if bg_music_url:
             dest_path = self._generate_download_path(bg_music_url, temp_dir, "bg_music")
             tasks.append(
                 DownloadTask(bg_music_url, dest_path, segment_id, "background_music")
             )
-
         # Voice over
-        if voice_over_url := segment.get("voice_over"):
+        voice_over_url = segment.get("voice_over", {}).get("url")
+        if voice_over_url:
             dest_path = self._generate_download_path(
                 voice_over_url, temp_dir, "voice_over"
             )
@@ -128,8 +129,8 @@ class DownloadService:
 
     async def download_segment_assets(
         self, segment: dict, temp_dir: str
-    ) -> Dict[str, str]:
-        """Download all assets for a segment and return path mappings"""
+    ) -> Dict[str, dict]:
+        """Download all assets for a segment and return asset objects with local_path, url, start_delay, end_delay (nếu có)"""
         segment_id = segment.get("id", str(uuid.uuid4()))
         download_tasks = self._extract_download_tasks(segment, temp_dir, segment_id)
 
@@ -140,20 +141,23 @@ class DownloadService:
         results = await asyncio.gather(
             *[self.download_file(task.url, task.dest_path) for task in download_tasks],
             return_exceptions=False,
-        )  # Changed to False to raise exceptions immediately
+        )
 
-        # Process results
-        path_mappings = {}
+        asset_result = {}
         for task, result in zip(download_tasks, results):
             if not result.success:
                 logger.error(f"Download failed for {task.asset_type}: {result.error}")
                 raise VideoCreationError(
                     f"Failed to download {task.asset_type}: {result.error}"
                 )
-            else:
-                path_mappings[f"{task.asset_type}_path"] = result.local_path
+            # Copy object gốc, chỉ bổ sung local_path
+            asset_obj = segment.get(task.asset_type, {})
+            asset_info = dict(asset_obj) if isinstance(asset_obj, dict) else {}
+            asset_info["url"] = task.url  # Đảm bảo luôn có url
+            asset_info["local_path"] = result.local_path
+            asset_result[task.asset_type] = asset_info
 
-        return path_mappings
+        return asset_result
 
     async def batch_download_segments(
         self, segments: List[dict], temp_dir: str

@@ -96,27 +96,7 @@ class VideoCreationServiceV2:
             processed_segment.update(download_result)
 
             # Determine duration if not already set
-            if "duration" not in processed_segment:
-                if voice_over_path := processed_segment.get("voice_over_path"):
-                    try:
-                        from moviepy import AudioFileClip
-
-                        with AudioFileClip(voice_over_path) as voice_clip:
-                            processed_segment["duration"] = voice_clip.duration
-                        logger.info(
-                            f"Set segment duration from voice_over: {processed_segment['duration']:.2f}s"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to get duration from voice_over: {e}")
-                        processed_segment["duration"] = (
-                            video_config.default_segment_duration
-                        )
-                else:
-                    processed_segment["duration"] = (
-                        video_config.default_segment_duration
-                    )
-                    logger.info("No voice_over found, using default segment duration")
-
+            
             processed_segments.append(processed_segment)
 
         return processed_segments

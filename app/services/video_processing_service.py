@@ -59,34 +59,57 @@ class VideoProcessingService:
     def _create_audio_composition(
         self, segment: Dict, apply_duration: float
     ) -> Optional[CompositeAudioClip]:
-        """Create composite audio from segment audio assets"""
+        """Create composite audio from segment audio assets (asset object format)"""
         audio_clips = []
 
         # Background music
-        if bg_music_path := segment.get("background_music_path"):
+        bg_music = segment.get("background_music", {})
+        bg_music_path = bg_music.get("local_path")
+        bgm_start_delay = bg_music.get("start_delay", 0)
+        bgm_end_delay = bg_music.get("end_delay", 0)
+        if bg_music_path:
             bgm_clip = self.resource_manager.track_clip(AudioFileClip(bg_music_path))
 
-            # Loop or trim background music to match duration
-            if bgm_clip.duration < apply_duration:
-                bgm_clip = bgm_clip.with_duration(apply_duration).with_fps(
+            # Loop or trim background music to match duration (không tính delay)
+            music_duration = apply_duration - bgm_start_delay - bgm_end_delay
+            if music_duration < 0:
+                music_duration = 0
+            if bgm_clip.duration < music_duration:
+                bgm_clip = bgm_clip.with_duration(music_duration).with_fps(
                     video_config.default_audio_fps
                 )
             else:
-                bgm_clip = bgm_clip.with_duration(apply_duration)
+                bgm_clip = bgm_clip.with_duration(music_duration)
 
-            # Reduce volume
+            # Thêm silence đầu/cuối nếu có delay
+            from moviepy.audio.AudioClip import AudioClip as MoviePyAudioClip
+            if bgm_start_delay > 0:
+                silence_start = MoviePyAudioClip(
+                    lambda t: np.zeros((len(t) if hasattr(t, "__len__") else 1, 2)),
+                    duration=bgm_start_delay,
+                    fps=getattr(bgm_clip, "fps", video_config.default_audio_fps),
+                )
+                audio_clips.append(silence_start)
+            # Giảm volume
             from moviepy.audio.fx.MultiplyVolume import MultiplyVolume
-
             bgm_quiet = MultiplyVolume(
                 factor=video_config.background_music_volume
             ).apply(bgm_clip)
             audio_clips.append(bgm_quiet)
+            if bgm_end_delay > 0:
+                silence_end = MoviePyAudioClip(
+                    lambda t: np.zeros((len(t) if hasattr(t, "__len__") else 1, 2)),
+                    duration=bgm_end_delay,
+                    fps=getattr(bgm_clip, "fps", video_config.default_audio_fps),
+                )
+                audio_clips.append(silence_end)
 
         # Voice over with delays
-        if voice_over_path := segment.get("voice_over_path"):
-            start_delay = segment.get("start_delay", video_config.default_start_delay)
-            end_delay = segment.get("end_delay", video_config.default_end_delay)
-
+        voice_over = segment.get("voice_over", {})
+        voice_over_path = voice_over.get("local_path")
+        start_delay = voice_over.get("start_delay", video_config.default_start_delay)
+        end_delay = voice_over.get("end_delay", video_config.default_end_delay)
+        if voice_over_path:
             original_voice_clip = self.resource_manager.track_clip(
                 AudioFileClip(voice_over_path)
             )
@@ -112,36 +135,40 @@ class VideoProcessingService:
         return CompositeAudioClip(audio_clips) if audio_clips else None
 
     def _determine_segment_duration(self, segment: Dict) -> float:
-        """Determine the duration for a segment"""
-        # If voice_over exists, use its duration
-        if voice_over_path := segment.get("voice_over_path"):
+        """Determine the total duration for a segment, including start_delay and end_delay, theo format asset object mới"""
+        # Ưu tiên lấy duration từ voice_over nếu có
+        voice_over = segment.get("voice_over", {})
+        voice_over_path = voice_over.get("local_path")
+        start_delay = voice_over.get("start_delay", video_config.default_start_delay)
+        end_delay = voice_over.get("end_delay", video_config.default_end_delay)
+        if voice_over_path:
             try:
                 voice_clip = AudioFileClip(voice_over_path)
                 duration = voice_clip.duration
                 voice_clip.close()
                 logger.info(f"Set segment duration from voice_over: {duration:.2f}s")
-                return duration
             except Exception as e:
                 logger.warning(f"Failed to get duration from voice_over: {e}")
+                duration = video_config.default_segment_duration
+        else:
+            duration = video_config.default_segment_duration
 
-        # Use explicit duration or default
-        return segment.get("duration", video_config.default_segment_duration)
+        total_duration = duration + start_delay + end_delay
+        logger.info(f"Total segment duration (with delay): {total_duration:.2f}s")
+        return total_duration
 
     def create_segment_clip(self, segment: Dict, temp_dir: str) -> VideoFileClip:
-        """Create a video clip from a processed segment"""
+        """Create a video clip from a processed segment (asset object format)"""
         try:
             # Determine timing
-            duration = self._determine_segment_duration(segment)
-            start_delay = segment.get("start_delay", video_config.default_start_delay)
-            end_delay = segment.get("end_delay", video_config.default_end_delay)
-            apply_duration = duration + start_delay + end_delay
-
+            total_duration = self._determine_segment_duration(segment)
             logger.info(
-                f"Creating clip with duration: {duration:.2f}s, total: {apply_duration:.2f}s"
+                f"Creating clip with total duration: {total_duration:.2f}s"
             )
 
             # Validate background image
-            bg_image_path = segment.get("background_image_path")
+            image_obj = segment.get("image", {})
+            bg_image_path = image_obj.get("local_path")
             if not bg_image_path or not os.path.exists(bg_image_path):
                 raise VideoCreationError("Background image not found for segment")
 
@@ -170,12 +197,12 @@ class VideoProcessingService:
 
             # Create base video clip with processed image
             base_clip = self.resource_manager.track_clip(
-                ImageClip(processed_bg_path, duration=apply_duration)
+                ImageClip(processed_bg_path, duration=total_duration)
             )
 
             # Add text overlays
             text_clips = self._create_text_clips(
-                segment.get("texts", []), apply_duration
+                segment.get("texts", []), total_duration
             )
 
             # Compose video with text overlays
@@ -185,7 +212,8 @@ class VideoProcessingService:
             )
 
             # Add audio composition
-            audio_composition = self._create_audio_composition(segment, apply_duration)
+            # Cần truyền đúng asset object cho _create_audio_composition nếu muốn đồng bộ
+            audio_composition = self._create_audio_composition(segment, total_duration)
             if audio_composition:
                 final_clip = final_clip.with_audio(audio_composition)
 
