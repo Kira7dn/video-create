@@ -80,7 +80,7 @@ def get_smart_pad_color(
     return (0, 0, 0)
 
 
-def process_images_with_padding(
+def process_image(
     image_paths: Union[str, List[str]],
     target_size=(1280, 720),
     pad_color=(0, 0, 0),
