@@ -109,14 +109,12 @@ async def create_video(
                 )
             # Parse JSON
             json_data = json.loads(content.decode("utf-8"))
-            if not isinstance(json_data, list):
-                raise ValueError("JSON must be an array of segments")
+            if not isinstance(json_data, dict) or "segments" not in json_data:
+                raise ValueError("Invalid JSON format: 'segments' key is required")
             output_path = await video_service_v2.create_video_from_json(json_data)
             job_store = load_job_store()
             job_store[job_id]["status"] = "done"
-            job_store[job_id][
-                "result"
-            ] = f"https://{settings.ngrok_url}/api/v1/video/download/{os.path.basename(output_path)}"
+            job_store[job_id]["result"] = f"https://{settings.ngrok_url}/api/v1/video/download/{os.path.basename(output_path)}"
             save_job_store(job_store)
         except Exception as e:
             job_store = load_job_store()

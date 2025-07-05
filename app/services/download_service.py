@@ -8,7 +8,7 @@ import logging
 import asyncio
 import aiohttp
 import aiofiles
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from urllib.parse import urlparse
 from dataclasses import dataclass
 
@@ -160,13 +160,27 @@ class DownloadService:
         return asset_result
 
     async def batch_download_segments(
-        self, segments: List[dict], temp_dir: str
-    ) -> List[Dict[str, str]]:
-        """Download assets for multiple segments concurrently"""
-        download_tasks = []
-
-        for segment in segments:
-            download_tasks.append(self.download_segment_assets(segment, temp_dir))
+        self, json_data: dict, temp_dir: str
+    ) -> Tuple[List[Dict[str, dict]], Optional[Dict[str, dict]]]:
+        """Download assets for multiple segments và background_music riêng biệt"""
+        segments = json_data.get("segments", [])
+        background_music = json_data.get("background_music", {})
+        
+        # Download segment assets
+        segment_tasks = [
+            self.download_segment_assets(segment, temp_dir) for segment in segments
+        ]
+        
+        # Download background music riêng (nếu có)
+        background_music_result = None
+        if background_music.get("url"):
+            # Tạo fake segment chứa background_music
+            fake_segment = {
+                "id": "global_background_music", 
+                "background_music": background_music
+            }
+            bg_music_download = await self.download_segment_assets(fake_segment, temp_dir)
+            background_music_result = bg_music_download.get("background_music")
 
         # Limit concurrent downloads to prevent overwhelming the server
         semaphore = asyncio.Semaphore(video_config.max_concurrent_downloads)
@@ -175,8 +189,8 @@ class DownloadService:
             async with semaphore:
                 return await task
 
-        results = await asyncio.gather(
-            *[bounded_download(task) for task in download_tasks]
+        segment_results = await asyncio.gather(
+            *[bounded_download(task) for task in segment_tasks]
         )
 
-        return results
+        return segment_results, background_music_result

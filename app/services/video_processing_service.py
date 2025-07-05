@@ -270,7 +270,7 @@ class VideoProcessingService:
         return clip_paths
 
     def concatenate_clips(
-        self, clip_paths: List[str], output_path: str
+        self, clip_paths: List[str], output_path: str, background_music: Optional[dict] = None
     ) -> Any:
         """Concatenate video clips using ffmpeg only. Transitions are not supported."""
         from utils.video_utils import ffmpeg_concat_videos
@@ -286,7 +286,7 @@ class VideoProcessingService:
                 f"Memory usage before concatenation: {memory.percent:.1f}% ({memory.used // 1024 // 1024} MB used)"
             )
 
-            ffmpeg_concat_videos(clip_paths, output_path, logger=logger)
+            ffmpeg_concat_videos(clip_paths, output_path, background_music, logger=logger)
             logger.info(f"ffmpeg concat output: {output_path}")
             # self.resource_manager.track_file(output_path)
 
