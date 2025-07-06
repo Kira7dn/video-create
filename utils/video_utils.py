@@ -141,6 +141,16 @@ def ffmpeg_concat_videos(
 
     # 1. Concat segments with transitions
     current = video_segments[0]
+    
+    # 🔍 DEBUG: Log duration của segment đầu tiên
+    try:
+        initial_duration = get_duration(current["path"])
+        if logger:
+            logger.info(f"🎬 Initial segment '{current['id']}' duration: {initial_duration:.3f}s")
+    except Exception as e:
+        if logger:
+            logger.warning(f"Could not get initial segment duration: {e}")
+    
     for idx in range(1, len(video_segments)):
         next_seg = video_segments[idx]
         transition = None
@@ -152,11 +162,20 @@ def ffmpeg_concat_videos(
         t_type = normalize_transition_type(transition.get("type")) if transition and transition.get("type") else normalize_transition_type(default_transition_type)
         t_duration = float(transition.get("duration", default_transition_duration)) if transition else default_transition_duration
         
-        if logger:
-            logger.info(f"🔄 Applying transition {idx}: {t_type} (duration: {t_duration}s) from '{current['id']}' to '{next_seg['id']}'")
-        
+        # 🔍 DEBUG: Log chi tiết transition
         dur1 = get_duration(current["path"])
+        dur2 = get_duration(next_seg["path"])
         offset = dur1 - t_duration
+        
+        if logger:
+            logger.info(f"🔄 Transition {idx}: {t_type} (duration: {t_duration}s)")
+            logger.info(f"   From '{current['id']}' (duration: {dur1:.3f}s) to '{next_seg['id']}' (duration: {dur2:.3f}s)")
+            logger.info(f"   Calculated offset: {offset:.3f}s")
+        
+        if offset < 0:
+            if logger:
+                logger.warning(f"⚠️ NEGATIVE OFFSET! This will cause timing issues. dur1={dur1}s < t_duration={t_duration}s")
+        
         temp_out = os.path.join(temp_dir, f"xfade_{idx}.mp4")
         ffmpeg_cmd = [
             "ffmpeg", "-y",
@@ -169,6 +188,19 @@ def ffmpeg_concat_videos(
             "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-c:a", "aac", temp_out
         ]
         safe_subprocess_run(ffmpeg_cmd, f"Video transition {idx} ({t_type})", logger)
+        
+        # 🔍 DEBUG: Log duration của output sau transition
+        try:
+            output_duration = get_duration(temp_out)
+            expected_duration = dur1 + dur2 - t_duration
+            if logger:
+                logger.info(f"🎬 Transition {idx} output duration: {output_duration:.3f}s (expected: {expected_duration:.3f}s)")
+                if abs(output_duration - expected_duration) > 0.1:
+                    logger.warning(f"⚠️ Unexpected duration change! Expected: {expected_duration:.3f}s, Got: {output_duration:.3f}s")
+        except Exception as e:
+            if logger:
+                logger.warning(f"Could not get transition output duration: {e}")
+        
         current = {"id": next_seg["id"], "path": temp_out}
     # Final intermediate output in temp_dir
     temp_path = os.path.join(temp_dir, "concat_output.mp4")

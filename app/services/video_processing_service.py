@@ -37,6 +37,23 @@ class VideoProcessingService:
         if not voice_over_path:
             return None
 
+        # 🔍 DEBUG: Log độ dài audio input gốc
+        try:
+            from utils.video_utils import VideoProcessingError
+            def get_duration(path):
+                import json
+                cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path]
+                result = safe_subprocess_run(cmd, f"Get duration for {path}", logger)
+                info = json.loads(result.stdout)
+                return float(info["format"]["duration"])
+            
+            original_duration = get_duration(voice_over_path)
+            logger.info(f"🎵 ORIGINAL audio duration for segment '{id}': {original_duration:.3f}s")
+            logger.info(f"🎵 Audio delays - start: {vo_start_delay}s, end: {vo_end_delay}s")
+        except Exception as e:
+            logger.warning(f"Could not get original audio duration: {e}")
+            original_duration = 0
+
         filter_inputs = [f"-i {voice_over_path}"]
         filter_complex = []
         amix_inputs = []
@@ -47,16 +64,22 @@ class VideoProcessingService:
         if vo_start_delay > 0:
             delay_ms = int(vo_start_delay * 1000)
             vo_filters.append(f"adelay={delay_ms}|{delay_ms}")
-        # Thêm normalize loudness (EBU R128)
-        vo_filters.append("loudnorm=I=-16:TP=-1.5:LRA=11")
+            logger.info(f"🔧 Adding start delay: {delay_ms}ms")
+        
+        # 🔧 FIXED: Sử dụng loudnorm với target âm lượng cao hơn + volume boost để có âm thanh đủ to
+        vo_filters.append("loudnorm=I=-8:TP=-0.5:LRA=5")  # Target rất cao: -8dB để âm thanh to hơn
+        vo_filters.append("volume=2.0")  # Boost thêm 6dB (x2) sau khi normalize
+        logger.info(f"🔧 Using aggressive loudnorm (I=-8dB) + volume boost (2.0x) for better audio volume")
+        
         if vo_end_delay > 0:
             vo_filters.append(f"apad=pad_dur={vo_end_delay}")
+            logger.info(f"🔧 Adding end delay: {vo_end_delay}s")
         vo_chain = ",".join(vo_filters) if vo_filters else "anull"
         filter_complex.append(f"[{idx}:a]{vo_chain}[vo]")
         amix_inputs.append("[vo]")
 
-        # Amix (chỉ 1 input, nhưng giữ nguyên pipeline)
-        filter_complex.append(f"{''.join(amix_inputs)}amix=inputs=1:duration=longest[aout]")
+        # 🔧 FIX: Thay duration=longest bằng duration=first để tránh silence thừa
+        filter_complex.append(f"{''.join(amix_inputs)}amix=inputs=1:duration=first[aout]")
 
         # Output file
         out_audio = os.path.join(temp_dir, f"audio_{id}.wav")
@@ -67,7 +90,28 @@ class VideoProcessingService:
             "-filter_complex", ";".join(filter_complex),
             "-map", "[aout]", "-ac", "2", "-ar", "44100", out_audio
         ]
+        
+        logger.info(f"🔧 Audio filter chain: {';'.join(filter_complex)}")
         safe_subprocess_run(ffmpeg_cmd, f"Audio composition for segment {id}", logger)
+        
+        # 🔍 DEBUG: Log độ dài audio output sau xử lý
+        try:
+            def get_duration_local(path):
+                import json
+                cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path]
+                result = safe_subprocess_run(cmd, f"Get duration for {path}", logger)
+                info = json.loads(result.stdout)
+                return float(info["format"]["duration"])
+            
+            final_duration = get_duration_local(out_audio)
+            duration_diff = final_duration - original_duration
+            logger.info(f"🎵 PROCESSED audio duration for segment '{id}': {final_duration:.3f}s")
+            logger.info(f"🎵 Duration difference: {duration_diff:+.3f}s")
+            if abs(duration_diff) > 0.1:  # Nếu chênh lệch > 100ms
+                logger.warning(f"⚠️ Significant duration change detected! Original: {original_duration:.3f}s → Final: {final_duration:.3f}s")
+        except Exception as e:
+            logger.warning(f"Could not get processed audio duration: {e}")
+        
         return out_audio
 
     def create_segment_clip(self, segment: Dict, temp_dir: str) -> str:
@@ -98,7 +142,6 @@ class VideoProcessingService:
                 raise VideoCreationError("Failed to process background image")
 
             processed_bg_path = processed_image_paths[0]
-            self.resource_manager.track_file(processed_bg_path)
 
             # Prepare audio (ffmpeg-based)
             audio_path = self._create_audio_composition(segment, temp_dir)
@@ -118,6 +161,7 @@ class VideoProcessingService:
                 "-i", processed_bg_path,
                 "-i", audio_path,
                 "-vf", "scale=1920:1080,format=yuv420p",
+                "-af", "volume=1.5",  # 🔧 Tăng thêm 50% âm lượng ở bước cuối
                 "-pix_fmt", "yuv420p",
                 "-r", str(video_config.default_fps),
                 "-shortest",
