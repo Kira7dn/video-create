@@ -59,6 +59,7 @@ class VideoCreationServiceV2:
 
         # Phase 2: Update segments with downloaded paths and process clips
         segments = json_data.get("segments", [])
+        transitions = json_data.get("transitions", [])
         processed_segments = self._merge_segments_with_downloads(
             segments, segment_results
         )
@@ -73,7 +74,7 @@ class VideoCreationServiceV2:
             # Phase 3: Concatenate clips với background_music
             output_path = os.path.join("data", "output", f"final_video_{video_id}.mp4")
             final_clip_path = video_processor.concatenate_clips(
-                clip_paths, output_path, background_music=background_music_result
+                clip_paths, output_path, temp_dir=temp_dir, background_music=background_music_result, transitions=transitions
             )
             if os.path.exists(final_clip_path):
                 logger.info(f"✅ Created video: {final_clip_path}")

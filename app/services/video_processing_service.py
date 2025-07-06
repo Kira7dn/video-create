@@ -155,6 +155,7 @@ class VideoProcessingService:
     def concatenate_clips(
         self, video_segments: List[Dict[str, str]],
         output_path: str,
+        temp_dir: str,
         transitions: Optional[list] = None,
         background_music: Optional[dict] = None,
         default_transition_type: str = "fade",
@@ -173,6 +174,7 @@ class VideoProcessingService:
             ffmpeg_concat_videos(
                 video_segments=video_segments,
                 output_path=output_path,
+                temp_dir=temp_dir,
                 transitions=transitions,
                 background_music=background_music,
                 logger=logger,

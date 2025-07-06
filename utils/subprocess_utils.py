@@ -44,6 +44,13 @@ def safe_subprocess_run(cmd, operation_name="FFmpeg operation", custom_logger: O
         return result
     except subprocess.CalledProcessError as e:
         error_msg = f"{operation_name} failed with return code {e.returncode}"
+        
+        # Windows-specific error code handling
+        if e.returncode == -2147024896:  # 0x80004005 as signed int
+            error_msg += " (Windows Error 0x80004005 - Access Denied or File in Use)"
+        elif e.returncode == 3131621040:  # Another form of 0x80004005
+            error_msg += " (Windows Error - Possible file access or permission issue)"
+        
         if e.stderr:
             error_msg += f"\nFFmpeg stderr: {e.stderr}"
         if e.stdout:
@@ -51,8 +58,11 @@ def safe_subprocess_run(cmd, operation_name="FFmpeg operation", custom_logger: O
         if active_logger:
             active_logger.error(error_msg)
         raise SubprocessError(error_msg) from e
-    except FileNotFoundError as e:
-        error_msg = f"{operation_name} failed: FFmpeg not found. Please ensure FFmpeg is installed and in PATH."
+    except (OSError, PermissionError) as e:
+        if isinstance(e, FileNotFoundError):
+            error_msg = f"{operation_name} failed: FFmpeg not found. Please ensure FFmpeg is installed and in PATH."
+        else:
+            error_msg = f"{operation_name} failed with OS/Permission error: {e}"
         if active_logger:
             active_logger.error(error_msg)
         raise SubprocessError(error_msg) from e

@@ -14,7 +14,7 @@ services:
       - ./test:/app/test # Mount thư mục test để có thể truy cập test files
     networks:
       - app_network
-    mem_limit: 8g # Giới hạn bộ nhớ tối đa 8GB cho container FastAPI
+    mem_limit: 1g # Giới hạn bộ nhớ tối đa 1GB cho container FastAPI
 
   # Ngrok tunnel
   ngrok:
