@@ -151,25 +151,9 @@ async def download_video(filename: str):
                 "details": "Filename contains invalid characters",
             },
         )
+    file_path = os.path.join("data", "output", filename)
 
-    # Look for file in common temp directories
-    # Extract UUID from filename pattern: final_batch_video_{uuid}.mp4 or final_video_{uuid}.mp4
-    uuid_part = filename.replace("final_video_", "").replace(".mp4", "")
-    possible_paths = [
-        os.path.join(f"tmp_create_{uuid_part}", filename),
-        os.path.join("data", "output", filename),  # Direct path
-    ]
-
-    file_path = None
-    for path in possible_paths:
-        logger.info(
-            f"[DOWNLOAD] Checking path: {path} - exists: {os.path.exists(path)}"
-        )
-        if os.path.exists(path):
-            file_path = path
-            break
-
-    if not file_path or not os.path.exists(file_path):
+    if not os.path.exists(file_path):
         raise HTTPException(
             status_code=404,
             detail={

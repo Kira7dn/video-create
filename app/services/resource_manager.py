@@ -108,7 +108,7 @@ async def managed_temp_directory(prefix: Optional[str] = None) -> AsyncIterator[
     import uuid
 
     if prefix is None:
-        prefix = video_config.temp_dir_prefix
+        prefix = os.path.join("data", video_config.temp_dir_prefix)
 
     temp_dir = f"{prefix}{uuid.uuid4().hex}"
     os.makedirs(temp_dir, exist_ok=True)

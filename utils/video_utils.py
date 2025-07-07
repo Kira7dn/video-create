@@ -3,7 +3,15 @@ from utils.subprocess_utils import safe_subprocess_run, SubprocessError
 
 
 class VideoProcessingError(SubprocessError):
-    """Custom exception for video processing errors - inherits from SubprocessError"""
+    """Custom ex                 if not transition:
+                # Không có transition cho cặp này, chuyển sang cặp tiếp theo
+                i += 1
+                continue if not transition:
+                # Không có transition cho cặp này, chuyển sang cặp tiếp theo
+                if logger:
+                    logger.info(f"� No transition between {current_seg['last_original_id']} and {next_seg['id']}")
+                i += 1
+                continuen for video processing errors - inherits from SubprocessError"""
     pass
 
 def ffmpeg_concat_videos(
@@ -28,7 +36,6 @@ def ffmpeg_concat_videos(
     import json
     import re
     import time
-    import stat
 
     def get_duration(path):
         cmd = [
@@ -62,6 +69,7 @@ def ffmpeg_concat_videos(
     
     # Valid xfade transition types mapping
     VALID_TRANSITIONS = {
+        'cut': 'cut',  # Special case: no encoding needed
         'fade': 'fade',
         'crossfade': 'fade',  # Map crossfade to fade
         'fadeblack': 'fadeblack',
@@ -95,6 +103,37 @@ def ffmpeg_concat_videos(
                 logger.warning(f"⚠️ Unknown transition type '{transition_type}', falling back to 'fade'")
             return 'fade'  # Safe fallback
     
+    def get_hardware_encoder():
+        """Detect and return best available hardware encoder"""
+        try:
+            # Test NVIDIA GPU support
+            result = safe_subprocess_run(
+                ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                 "-c:v", "h264_nvenc", "-f", "null", "NUL" if os.name == "nt" else "/dev/null"],
+                "Test NVIDIA encoder", None
+            )
+            return "h264_nvenc"  # NVIDIA GPU
+        except:
+            try:
+                # Test Intel Quick Sync
+                result = safe_subprocess_run(
+                    ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                     "-c:v", "h264_qsv", "-f", "null", "NUL" if os.name == "nt" else "/dev/null"],
+                    "Test Intel QSV", None
+                )
+                return "h264_qsv"  # Intel GPU
+            except:
+                try:
+                    # Test AMD GPU
+                    result = safe_subprocess_run(
+                        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                         "-c:v", "h264_amf", "-f", "null", "NUL" if os.name == "nt" else "/dev/null"],
+                        "Test AMD encoder", None
+                    )
+                    return "h264_amf"  # AMD GPU
+                except:
+                    return "libx264"  # CPU fallback
+    
     def validate_inputs():
         """Validate input parameters"""
         if not video_segments:
@@ -116,97 +155,158 @@ def ffmpeg_concat_videos(
         if output_dir and not os.path.exists(output_dir):
             raise VideoProcessingError(f"Output directory not found: {output_dir}")
         
-        # Check write permissions
+        # Check write permissions (simplified for production)
         if output_dir:
             try:
-                test_file = os.path.join(output_dir, f"test_write_{int(time.time())}.tmp")
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
+                # Quick check without creating temporary file
+                if not os.access(output_dir, os.W_OK):
+                    raise VideoProcessingError(f"No write permission for output directory: {output_dir}")
             except (OSError, PermissionError) as e:
                 raise VideoProcessingError(f"Cannot write to output directory {output_dir}: {e}")
         
-        # Check disk space (Windows-specific handling)
-        try:
-            if os.name == 'nt':  # Windows
-                free_bytes = shutil.disk_usage(output_dir or '.').free
-                if free_bytes < 100 * 1024 * 1024:  # Less than 100MB
-                    raise VideoProcessingError(f"Insufficient disk space: {free_bytes // 1024 // 1024}MB available")
-        except Exception as e:
-            if logger:
-                logger.warning(f"Could not check disk space: {e}")
+        # Optional disk space check - skip for better performance in production
+        # Uncomment if disk space monitoring is critical:
+        # try:
+        #     if os.name == 'nt':  # Windows
+        #         free_bytes = shutil.disk_usage(output_dir or '.').free
+        #         if free_bytes < 100 * 1024 * 1024:  # Less than 100MB
+        #             raise VideoProcessingError(f"Insufficient disk space: {free_bytes // 1024 // 1024}MB available")
+        # except Exception as e:
+        #     if logger:
+        #         logger.warning(f"Could not check disk space: {e}")
     
     # Validate inputs before processing
     validate_inputs()
 
-    # 1. Concat segments with transitions
-    current = video_segments[0]
-    
-    # 🔍 DEBUG: Log duration của segment đầu tiên
-    try:
-        initial_duration = get_duration(current["path"])
-        if logger:
-            logger.info(f"🎬 Initial segment '{current['id']}' duration: {initial_duration:.3f}s")
-    except Exception as e:
-        if logger:
-            logger.warning(f"Could not get initial segment duration: {e}")
-    
-    for idx in range(1, len(video_segments)):
-        next_seg = video_segments[idx]
-        transition = None
-        if transitions:
-            for t in transitions:
-                if t.get("from_segment") == current["id"] and t.get("to_segment") == next_seg["id"]:
-                    transition = t
-                    break
-        t_type = normalize_transition_type(transition.get("type")) if transition and transition.get("type") else normalize_transition_type(default_transition_type)
-        t_duration = float(transition.get("duration", default_transition_duration)) if transition else default_transition_duration
-        
-        # 🔍 DEBUG: Log chi tiết transition
-        dur1 = get_duration(current["path"])
-        dur2 = get_duration(next_seg["path"])
-        offset = dur1 - t_duration
-        
-        if logger:
-            logger.info(f"🔄 Transition {idx}: {t_type} (duration: {t_duration}s)")
-            logger.info(f"   From '{current['id']}' (duration: {dur1:.3f}s) to '{next_seg['id']}' (duration: {dur2:.3f}s)")
-            logger.info(f"   Calculated offset: {offset:.3f}s")
-        
-        if offset < 0:
-            if logger:
-                logger.warning(f"⚠️ NEGATIVE OFFSET! This will cause timing issues. dur1={dur1}s < t_duration={t_duration}s")
-        
-        temp_out = os.path.join(temp_dir, f"xfade_{idx}.mp4")
+    # 1. Concat segments
+    if not transitions:
+        # Nối thẳng không hiệu ứng bằng concat demuxer
+        concat_list_path = os.path.join(temp_dir, "concat_list.txt")
+        with open(concat_list_path, "w", encoding="utf-8") as f:
+            for seg in video_segments:
+                f.write(f"file '{os.path.abspath(seg['path'])}'\n")
+        temp_path = os.path.join(temp_dir, "concat_output.mp4")
         ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-i", current["path"],
-            "-i", next_seg["path"],
-            "-filter_complex",
-            f"[0:v][1:v]xfade=transition={t_type}:duration={t_duration}:offset={offset}[v];"
-            f"[0:a][1:a]acrossfade=d={t_duration}[a]",
-            "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-profile:v", "high", "-pix_fmt", "yuv420p", "-c:a", "aac", temp_out
+            "ffmpeg", "-y", "-threads", "1",
+            "-f", "concat", "-safe", "0", "-i", concat_list_path,
+            "-c", "copy", temp_path
         ]
-        safe_subprocess_run(ffmpeg_cmd, f"Video transition {idx} ({t_type})", logger)
+        safe_subprocess_run(ffmpeg_cmd, "Concat without transition", logger)
+        if logger:
+            logger.info(f"Final video concat (no transition): {temp_path}")
+    else:
+        # Sử dụng thuật toán xử lý tuần tự:
+        # Bắt đầu với list các segment, xử lý từng transition một cách tuần tự
+        # Mỗi khi có transition, thay thế 2 segment liên tiếp bằng 1 file xfade
         
-        # 🔍 DEBUG: Log duration của output sau transition
-        try:
-            output_duration = get_duration(temp_out)
-            expected_duration = dur1 + dur2 - t_duration
-            if logger:
-                logger.info(f"🎬 Transition {idx} output duration: {output_duration:.3f}s (expected: {expected_duration:.3f}s)")
-                if abs(output_duration - expected_duration) > 0.1:
-                    logger.warning(f"⚠️ Unexpected duration change! Expected: {expected_duration:.3f}s, Got: {output_duration:.3f}s")
-        except Exception as e:
-            if logger:
-                logger.warning(f"Could not get transition output duration: {e}")
+        # Copy danh sách segments để xử lý, track both combined and original IDs
+        remaining_segments = [{"id": seg["id"], "path": seg["path"], "last_original_id": seg["id"]} for seg in video_segments]
         
-        current = {"id": next_seg["id"], "path": temp_out}
-    # Final intermediate output in temp_dir
-    temp_path = os.path.join(temp_dir, "concat_output.mp4")
-    shutil.copy2(current["path"], temp_path)
-    if logger:
-        logger.info(f"Final video with transitions (temp): {temp_path}")
+        if logger:
+            logger.info(f"🎬 Processing {len(video_segments)} segments with {len(transitions) if transitions else 0} transitions")
+        
+        # Xử lý từng transition theo thứ tự xuất hiện trong danh sách segments
+        transition_counter = 0
+        i = 0
+        while i < len(remaining_segments) - 1:
+            current_seg = remaining_segments[i]
+            next_seg = remaining_segments[i + 1]
+            
+            # Tìm transition cho cặp sử dụng last_original_id của current và original id của next
+            transition = None
+            if transitions:
+                for t in transitions:
+                    # So sánh last_original_id của current_seg với original id của next_seg
+                    if t.get("from_segment") == current_seg["last_original_id"] and t.get("to_segment") == next_seg["id"]:
+                        transition = t
+                        if logger:
+                            logger.info(f"✅ Found transition: {t.get('from_segment')} → {t.get('to_segment')} ({t.get('type', 'fade')})")
+                        break
+            
+            if not transition:
+                # Không có transition cho cặp này, chuyển sang cặp tiếp theo
+                if logger:
+                    logger.info(f"� No transition between {current_seg['id']} and {next_seg['id']}")
+                i += 1
+                continue
+            
+            # Có transition - kiểm tra xem có phải cut transition không
+            transition_counter += 1
+            t_type = normalize_transition_type(transition.get("type")) if transition and transition.get("type") else normalize_transition_type(default_transition_type)
+            t_duration = float(transition.get("duration", default_transition_duration)) if transition else default_transition_duration
+            
+            if t_type == 'cut':
+                # Cut transition: Không cần encode, chỉ nối trực tiếp
+                if logger:
+                    logger.info(f"⚡ Cut transition {transition_counter}: No encoding needed")
+                # Giữ nguyên 2 segments, không tạo xfade file
+                i += 1
+                continue
+            
+            # Visual transition: Cần encode
+            dur1 = get_duration(current_seg["path"])
+            dur2 = get_duration(next_seg["path"])
+            offset = dur1 - t_duration
+            if logger:
+                logger.info(f"🔄 Transition {transition_counter}: {t_type} (duration: {t_duration}s)")
+            if offset < 0:
+                if logger:
+                    logger.warning(f"⚠️ NEGATIVE OFFSET! This will cause timing issues. dur1={dur1}s < t_duration={t_duration}s")
+            
+            temp_out = os.path.join(temp_dir, f"xfade_{transition_counter}.mp4")
+            
+            # Use hardware encoder if available for better performance
+            encoder = get_hardware_encoder()
+            encode_settings = []
+            if encoder == "libx264":
+                # CPU encoding - optimize for speed
+                encode_settings = ["-preset", "ultrafast", "-tune", "fastdecode"]
+            elif encoder in ["h264_nvenc", "h264_qsv", "h264_amf"]:
+                # GPU encoding - use high performance preset
+                encode_settings = ["-preset", "p1"]  # Fastest preset for NVENC
+            
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-threads", "0",  # Use all CPU cores
+                "-i", current_seg["path"],
+                "-i", next_seg["path"],
+                "-filter_complex",
+                f"[0:v][1:v]xfade=transition={t_type}:duration={t_duration}:offset={offset}[v];"
+                f"[0:a][1:a]acrossfade=d={t_duration}[a]",
+                "-map", "[v]", "-map", "[a]",
+                "-c:v", encoder, *encode_settings, "-pix_fmt", "yuv420p", "-c:a", "aac", temp_out
+            ]
+            safe_subprocess_run(ffmpeg_cmd, f"Video transition {transition_counter} ({t_type})", logger)
+            
+            # Thay thế 2 segment bằng 1 file transition
+            # Giữ lại last_original_id của segment thứ hai để tiếp tục tìm transitions
+            new_segment = {"id": f"{current_seg['id']}+{next_seg['id']}", "path": temp_out, "last_original_id": next_seg["id"]}
+            remaining_segments[i:i+2] = [new_segment]  # Thay thế 2 segment bằng 1
+            if logger:
+                logger.info(f"📁 Created transition file: {temp_out}")
+            
+            # Tiếp tục từ vị trí hiện tại (không tăng i vì list đã thay đổi)
+        
+        # Lấy danh sách đường dẫn file cuối cùng
+        final_segments = [seg["path"] for seg in remaining_segments]
+        
+        # Luôn dùng concat demuxer để nối các đoạn lại đúng thứ tự
+        concat_list_path = os.path.join(temp_dir, "concat_list.txt")
+        with open(concat_list_path, "w", encoding="utf-8") as f:
+            for seg_path in final_segments:
+                f.write(f"file '{os.path.abspath(seg_path)}'\n")
+        
+        if logger:
+            logger.info(f"📄 Created concat_list.txt with {len(final_segments)} files")
+        
+        temp_path = os.path.join(temp_dir, "concat_output.mp4")
+        ffmpeg_cmd = [
+            "ffmpeg", "-y", "-threads", "1",
+            "-f", "concat", "-safe", "0", "-i", concat_list_path,
+            "-c", "copy", temp_path
+        ]
+        safe_subprocess_run(ffmpeg_cmd, "Concat all segments in order (mixed transitions)", logger)
+        if logger:
+            logger.info(f"Final video concat (mixed, all segments in order): {temp_path}")
 
     # 2. Overlay background music if provided
     if background_music and background_music.get("local_path"):
@@ -247,7 +347,7 @@ def ffmpeg_concat_videos(
         )
         temp_final_with_bgm = os.path.join(temp_dir, "final_with_bgm.mp4")
         ffmpeg_mix_cmd = [
-            "ffmpeg", "-y",
+            "ffmpeg", "-y", "-threads", "1",
             "-i", temp_path,
             "-i", bgm_path,
             "-filter_complex", filter_complex,
