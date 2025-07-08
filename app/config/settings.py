@@ -54,10 +54,55 @@ class Settings(BaseSettings):
     log_date_format: str = "%Y-%m-%d %H:%M:%S"
 
     # Video Processing Settings
-    default_video_fps: int = 24
-    default_video_codec: str = "libx264"
-    default_audio_codec: str = "aac"
-    default_resolution: tuple = (1280, 720)
+    video_default_fps: int = 24
+    video_default_codec: str = "libx264"
+    video_default_audio_codec: str = "aac"
+    video_default_resolution: str = "1920,1080"
+    video_default_segment_duration: float = 5.0
+    video_default_start_delay: float = 0.5
+    video_default_end_delay: float = 0.5
+
+    # Audio Processing Settings
+    audio_background_music_volume: float = 0.1
+    audio_default_sample_rate: int = 44100
+    audio_default_bitrate: str = "192k"
+
+    # Text Overlay Settings
+    text_default_font_size: int = 48
+    text_default_font_color: str = "white"
+    text_default_font_file: str = "Arial"
+    text_default_fade_in: float = 0.5
+    text_default_fade_out: float = 0.5
+    text_default_position_x: str = "(w-text_w)/2"
+    text_default_position_y: str = "h-100"
+
+    # FFmpeg Settings
+    ffmpeg_binary_path: str = "ffmpeg"
+    ffmpeg_timeout: int = 300
+    ffmpeg_preset: str = "medium"
+    ffmpeg_threads: int = 0  # 0 = auto
+
+    # Download Settings
+    download_timeout: int = 30
+    download_max_concurrent: int = 10
+    download_retry_attempts: int = 3
+
+    # Temp Directory Settings
+    temp_dir_prefix: str = "tmp_create_"
+    temp_batch_dir: str = "tmp_pipeline"
+    temp_cleanup_age_hours: float = 1.0
+    temp_cleanup_retry_attempts: int = 3
+    temp_cleanup_retry_delay: float = 2.0
+    temp_delayed_cleanup_delay: float = 30.0
+
+    # Video Output Settings
+    output_directory: str = "data/output"
+
+    # Performance Settings
+    performance_gc_enabled: bool = True
+    performance_file_handle_delay: float = 1.0
+    performance_max_memory_mb: int = 2048
+    performance_max_concurrent_segments: int = 3
 
     # Security Settings
     request_timeout: int = 300  # 5 minutes
@@ -71,6 +116,33 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+
+    @property
+    def video_resolution_tuple(self) -> tuple:
+        """Get video resolution as tuple"""
+        if isinstance(self.video_default_resolution, str):
+            try:
+                parts = self.video_default_resolution.split(",")
+                if len(parts) == 2:
+                    return (int(parts[0]), int(parts[1]))
+            except (ValueError, AttributeError):
+                pass
+        return (1920, 1080)  # Default fallback
+
+    @field_validator("video_default_resolution")
+    @classmethod
+    def parse_resolution(cls, v):
+        """Validate resolution format"""
+        if isinstance(v, str):
+            try:
+                parts = v.split(",")
+                if len(parts) == 2:
+                    int(parts[0])  # Validate width
+                    int(parts[1])  # Validate height
+                    return v
+            except (ValueError, AttributeError):
+                return "1920,1080"  # Default fallback
+        return "1920,1080"
 
 
 # Global settings instance

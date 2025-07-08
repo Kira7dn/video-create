@@ -13,7 +13,7 @@ from typing import List, Optional, Union, AsyncIterator
 from pathlib import Path
 
 from moviepy import VideoFileClip, AudioFileClip, ImageClip
-from app.services.config.video_config import video_config
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class ResourceManager:
         self.cleanup_clips()
         self.cleanup_files()
 
-        if video_config.gc_collection_enabled:
+        if settings.performance_gc_enabled:
             gc.collect()
 
     def _schedule_delayed_cleanup(
@@ -71,7 +71,7 @@ class ResourceManager:
     ):
         """Schedule delayed cleanup for a file or directory"""
         if delay_seconds is None:
-            delay_seconds = video_config.delayed_cleanup_delay
+            delay_seconds = settings.temp_delayed_cleanup_delay
 
         def delayed_cleanup():
             try:
@@ -108,7 +108,7 @@ async def managed_temp_directory(prefix: Optional[str] = None) -> AsyncIterator[
     import uuid
 
     if prefix is None:
-        prefix = os.path.join("data", video_config.temp_dir_prefix)
+        prefix = os.path.join("data", settings.temp_dir_prefix)
 
     temp_dir = f"{prefix}{uuid.uuid4().hex}"
     os.makedirs(temp_dir, exist_ok=True)
@@ -128,9 +128,9 @@ async def _cleanup_temp_directory_async(temp_dir: str):
             return
 
         # Force garbage collection
-        if video_config.gc_collection_enabled:
+        if settings.performance_gc_enabled:
             gc.collect()
-            await asyncio.sleep(video_config.file_handle_release_delay)
+            await asyncio.sleep(settings.performance_file_handle_delay)
 
         # Non-Windows systems
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -145,9 +145,9 @@ def cleanup_old_temp_directories(
 ):
     """Clean up old temporary directories"""
     if base_pattern is None:
-        base_pattern = video_config.temp_dir_prefix
+        base_pattern = settings.temp_dir_prefix
     if max_age_hours is None:
-        max_age_hours = video_config.old_temp_cleanup_age_hours
+        max_age_hours = settings.temp_cleanup_age_hours
 
     try:
         current_time = time.time()

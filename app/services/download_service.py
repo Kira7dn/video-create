@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 
 from app.core.exceptions import VideoCreationError
-from app.services.config.video_config import video_config
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class DownloadService:
 
     async def __aenter__(self):
         """Async context manager entry"""
-        timeout = aiohttp.ClientTimeout(total=video_config.download_timeout)
+        timeout = aiohttp.ClientTimeout(total=settings.download_timeout)
         self.session = aiohttp.ClientSession(timeout=timeout)
         return self
 
@@ -183,7 +183,7 @@ class DownloadService:
             background_music_result = bg_music_download.get("background_music")
 
         # Limit concurrent downloads to prevent overwhelming the server
-        semaphore = asyncio.Semaphore(video_config.max_concurrent_downloads)
+        semaphore = asyncio.Semaphore(settings.download_max_concurrent)
 
         async def bounded_download(task):
             async with semaphore:

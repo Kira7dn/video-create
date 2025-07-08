@@ -29,6 +29,16 @@ class VideoCreationError(VideoProcessingError):
         super().__init__(message, error_code)
 
 
+class DownloadError(Exception):
+    """Exception raised when asset download fails"""
+    pass
+
+
+class ProcessingError(Exception):
+    """Exception raised when video processing fails"""
+    pass
+
+
 class FileValidationError(Exception):
     """Custom exception for file validation errors"""
 
@@ -36,6 +46,65 @@ class FileValidationError(Exception):
         self.message = message
         self.file_name = file_name
         super().__init__(self.message)
+
+
+class ValidationError(VideoProcessingError):
+    """Exception raised when input validation fails"""
+    
+    def __init__(self, message: str, validation_errors: Optional[list] = None):
+        super().__init__(message, "VALIDATION_ERROR")
+        self.validation_errors = validation_errors or []
+
+
+class PipelineError(VideoProcessingError):
+    """Exception raised when pipeline execution fails"""
+    
+    def __init__(self, message: str, stage_name: Optional[str] = None, stage_errors: Optional[list] = None):
+        super().__init__(message, "PIPELINE_ERROR")
+        self.stage_name = stage_name
+        self.stage_errors = stage_errors or []
+
+
+class ConcatenationError(ProcessingError):
+    """Exception raised when video concatenation fails"""
+    
+    def __init__(self, message: str, video_segments: Optional[list] = None):
+        super().__init__(message)
+        self.video_segments = video_segments or []
+
+
+class BatchProcessingError(ProcessingError):
+    """Exception raised when batch processing fails"""
+    
+    def __init__(self, message: str, failed_items: Optional[list] = None, successful_items: Optional[list] = None):
+        super().__init__(message)
+        self.failed_items = failed_items or []
+        self.successful_items = successful_items or []
+
+
+class ResourceError(VideoProcessingError):
+    """Exception raised when resource management fails"""
+    
+    def __init__(self, message: str, resource_type: Optional[str] = None):
+        super().__init__(message, "RESOURCE_ERROR")
+        self.resource_type = resource_type
+
+
+class ConfigurationError(VideoProcessingError):
+    """Exception raised when configuration is invalid"""
+    
+    def __init__(self, message: str, config_key: Optional[str] = None):
+        super().__init__(message, "CONFIGURATION_ERROR")
+        self.config_key = config_key
+
+
+class AssetError(DownloadError):
+    """Exception raised when asset handling fails"""
+    
+    def __init__(self, message: str, asset_type: Optional[str] = None, asset_url: Optional[str] = None):
+        super().__init__(message)
+        self.asset_type = asset_type
+        self.asset_url = asset_url
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
