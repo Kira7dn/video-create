@@ -26,7 +26,7 @@ def ffmpeg_concat_videos(
     bgm_volume: float = 0.2,
 ) -> None:
     """
-    Concatenate video segments with per-pair transitions, then overlay background music (with start_delay, end_delay) as in input_sample2.json.
+    Concatenate video segments with per-pair transitions, then overlay background music (with start_delay, end_delay) as in input_sample.json.
     - video_segments: list of dicts with 'id' and 'path'.
     - transitions: list of dicts with 'type', 'duration', 'from_segment', 'to_segment'.
     - background_music: dict with 'url' or 'local_path', 'start_delay', 'end_delay'.
@@ -359,12 +359,8 @@ def ffmpeg_concat_videos(
         safe_subprocess_run(ffmpeg_mix_cmd, "Background music mixing", logger)
         # Final output is temp_final_with_bgm
         temp_path = temp_final_with_bgm
-        if logger:
-            logger.info(f"Final video with background music (temp): {temp_path}")
 
     # 3. Copy final result to output_path (do not overwrite if exists)
     if os.path.exists(output_path):
         raise VideoProcessingError(f"Output file already exists: {output_path}")
     shutil.copy2(temp_path, output_path)
-    if logger:
-        logger.info(f"Copied final video to output: {output_path}")

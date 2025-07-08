@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     # Text Overlay Settings
     text_default_font_size: int = 48
     text_default_font_color: str = "white"
-    text_default_font_file: str = "Arial"
+    text_default_font_file: str = "fonts/Roboto-Black.ttf"
     text_default_fade_in: float = 0.5
     text_default_fade_out: float = 0.5
     text_default_position_x: str = "(w-text_w)/2"
@@ -102,7 +102,7 @@ class Settings(BaseSettings):
     performance_gc_enabled: bool = True
     performance_file_handle_delay: float = 1.0
     performance_max_memory_mb: int = 2048
-    performance_max_concurrent_segments: int = 3
+    performance_max_concurrent_segments: int = 1
 
     # Security Settings
     request_timeout: int = 300  # 5 minutes

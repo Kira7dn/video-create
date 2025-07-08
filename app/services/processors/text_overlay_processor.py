@@ -50,5 +50,5 @@ class TextOverlayProcessor:
         if text_over.get('box'):
             drawtext_args.append("box=1")
             drawtext_args.append(f"boxcolor={text_over.get('box_color', 'black@0.5')}")
-            drawtext_args.append(f"boxborderw={text_over.get('boxborderw', 10)}")
+            drawtext_args.append(f"boxborderw={text_over.get('box_border_width', 10)}")
         return "drawtext=" + ":".join(drawtext_args)

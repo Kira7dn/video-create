@@ -131,7 +131,6 @@ class SegmentProcessor:
             for text_over in text_overs:
                 drawtext_filter = TextOverlayProcessor.build_drawtext_filter(text_over, total_duration)
                 if drawtext_filter:
-                    logger.info(f"Adding drawtext filter: {drawtext_filter}")
                     video_filters.append(drawtext_filter)
         if input_type == "video":
             ffmpeg_cmd = [
