@@ -214,10 +214,31 @@ class VideoProcessingService:
                         safe_text = text_over['text']  # No escaping for now, just use raw text
                         
                         # Calculate end time based on segment duration if not specified
+                        text_start = text_over.get('start', text_over.get('start_time', 0))
+                        text_duration = text_over.get('duration')
                         text_end = text_over.get('end')
                         if text_end is None:
-                            text_end = min(5, total_duration)  # Default to 5s or segment duration, whichever is smaller
+                            if text_duration is not None:
+                                text_end = float(text_start) + float(text_duration)
+                            else:
+                                text_end = min(5, total_duration)  # Default to 5s or segment duration, whichever is smaller
                         
+                        # Fade-in/fade-out for text overlay (alpha)
+                        fade_in = float(text_over.get('fade_in', 0.5))  # seconds
+                        fade_out = float(text_over.get('fade_out', 0.5))  # seconds
+                        # Clamp fade durations if too long
+                        visible_duration = float(text_end) - float(text_start)
+                        fade_in = min(fade_in, visible_duration/2)
+                        fade_out = min(fade_out, visible_duration/2)
+                        # Alpha expression: fade in, hold, fade out
+                        # alpha=if(lt(t,start),0, if(lt(t,start+fade_in), (t-start)/fade_in, if(lt(t,end-fade_out), 1, if(lt(t,end), (end-t)/fade_out, 0))))
+                        alpha_expr = (
+                            f"if(lt(t,{text_start}),0,"  # before start
+                            f"if(lt(t,{text_start+fade_in}), (t-{text_start})/{fade_in},"  # fade in
+                            f"if(lt(t,{text_end-fade_out}), 1,"  # hold
+                            f"if(lt(t,{text_end}), ({text_end}-t)/{fade_out},0)"  # fade out
+                            f")))"
+                        )
                         # Validate font file exists
                         font_file = text_over.get('font_file', 'fonts/Roboto-Bold.ttf')
                         if not os.path.exists(font_file) and not font_file.startswith('/'):
@@ -226,7 +247,6 @@ class VideoProcessingService:
                             if not os.path.exists(font_file):
                                 logger.warning(f"Font file not found: {font_file}, using system default")
                                 font_file = "Arial"  # Fallback to system font
-                        
                         drawtext_args = [
                             f"fontfile={font_file}" if os.path.exists(font_file) else f"font={font_file}",
                             f"text={safe_text}",  # Use text without quotes (rely on escaping)
@@ -234,13 +254,13 @@ class VideoProcessingService:
                             f"fontsize={text_over.get('font_size', 48)}",
                             f"x={text_over.get('x', '(w-text_w)/2')}",
                             f"y={text_over.get('y', 'h-100')}",
-                            f"enable='between(t,{text_over.get('start', 0)},{text_end})'"
+                            f"enable='between(t,{text_start},{text_end})'",
+                            f"alpha='{alpha_expr}'"
                         ]
                         if text_over.get('box'):
                             drawtext_args.append("box=1")
                             drawtext_args.append(f"boxcolor={text_over.get('box_color', 'black@0.5')}")
                             drawtext_args.append(f"boxborderw={text_over.get('boxborderw', 10)}")
-                        
                         drawtext_filter = "drawtext=" + ":".join(drawtext_args)
                         logger.info(f"Adding drawtext filter: {drawtext_filter}")
                         video_filters.append(drawtext_filter)
