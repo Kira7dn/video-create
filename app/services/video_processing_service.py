@@ -79,175 +79,161 @@ class VideoProcessingService:
     def create_segment_clip(self, segment: Dict, temp_dir: str) -> str:
         """Create a video clip from a processed segment (asset object format) using ffmpeg CLI only (always with audio)"""
         try:
-            # Validate background image
             image_obj = segment.get("image", {})
+            video_obj = segment.get("video", {})
             bg_image_path = image_obj.get("local_path")
-            
-            # Extract transition info for fade preprocessing with support for multiple effect types
+            video_path = video_obj.get("local_path")
             transition_in = segment.get("transition_in", {})
             transition_out = segment.get("transition_out", {})
-            
-            if not bg_image_path or not os.path.exists(bg_image_path):
-                raise VideoCreationError("Background image not found for segment")
-
-            # Process image with padding for consistent size
-            from utils.image_utils import process_image
-
-            processed_image_paths = process_image(
-                image_paths=bg_image_path,
-                target_size=(1920, 1080),  # Standard HD size
-                smart_pad_color=True,  # Enable smart padding color detection
-                pad_color_method="average_edge",  # Use average edge method
-                auto_enhance=True,  # Enable auto image enhancement
-                enhance_brightness=True,  # Auto brightness adjustment
-                enhance_contrast=True,  # Auto contrast enhancement
-                enhance_saturation=True,  # Auto saturation optimization
-                output_dir=temp_dir,
-            )
-
-            if not processed_image_paths:
-                raise VideoCreationError("Failed to process background image")
-
-            processed_bg_path = processed_image_paths[0]
-
-            # Prepare audio (ffmpeg-based)
-            audio_path = self._create_audio_composition(segment, temp_dir)
-            if not audio_path:
-                raise VideoCreationError("Audio composition failed or missing for segment")
-
-            # Prepare output path
             segment_id = segment.get("id", str(uuid.uuid4()))
-            segment_output_path = os.path.join(
-                temp_dir, f"temp_segment_{segment_id}.mp4"
-            )
+            segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
 
-            # Build filter chains for transitions with ADDITIVE approach
+            # Determine input type and get input path, duration, and audio path
+            if video_path and os.path.exists(video_path):
+                input_type = "video"
+                input_path = video_path
+                # Probe video duration
+                try:
+                    probe_cmd = [
+                        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                        "-of", "csv=p=0", video_path
+                    ]
+                    result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                    original_duration = float(result.stdout.strip())
+                except Exception as e:
+                    logger.warning(f"Could not get video duration for segment {segment_id}: {e}")
+                    original_duration = 4.0  # Fallback
+                audio_input_path = video_path  # Use video file's audio
+            else:
+                input_type = "image"
+                # Validate background image
+                if not bg_image_path or not os.path.exists(bg_image_path):
+                    raise VideoCreationError("Background image not found for segment")
+                from utils.image_utils import process_image
+                processed_image_paths = process_image(
+                    image_paths=bg_image_path,
+                    target_size=(1920, 1080),
+                    smart_pad_color=True,
+                    pad_color_method="average_edge",
+                    auto_enhance=True,
+                    enhance_brightness=True,
+                    enhance_contrast=True,
+                    enhance_saturation=True,
+                    output_dir=temp_dir,
+                )
+                if not processed_image_paths:
+                    raise VideoCreationError("Failed to process background image")
+                input_path = processed_image_paths[0]
+                # Prepare audio (ffmpeg-based)
+                audio_path = self._create_audio_composition(segment, temp_dir)
+                if not audio_path:
+                    raise VideoCreationError("Audio composition failed or missing for segment")
+                # Probe audio duration
+                try:
+                    probe_cmd = [
+                        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                        "-of", "csv=p=0", audio_path
+                    ]
+                    result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                    original_duration = float(result.stdout.strip())
+                except Exception as e:
+                    logger.warning(f"Could not get audio duration for segment {segment_id}: {e}")
+                    original_duration = 4.0  # Fallback
+                # Create extended audio for additive fades if needed
+                fade_in_duration = float(transition_in.get("duration", 0) or 0)
+                fade_out_duration = float(transition_out.get("duration", 0) or 0)
+                extended_audio_path = audio_path
+                if fade_in_duration > 0 or fade_out_duration > 0:
+                    extended_audio_path = os.path.join(temp_dir, f"extended_audio_{segment_id}.wav")
+                    audio_inputs = []
+                    if fade_in_duration > 0:
+                        audio_inputs.append(f"-f lavfi -t {fade_in_duration} -i anullsrc=channel_layout=stereo:sample_rate=44100")
+                    audio_inputs.append(f"-i {audio_path}")
+                    if fade_out_duration > 0:
+                        audio_inputs.append(f"-f lavfi -t {fade_out_duration} -i anullsrc=channel_layout=stereo:sample_rate=44100")
+                    if fade_in_duration > 0 and fade_out_duration > 0:
+                        filter_str = "[0:a][1:a][2:a]concat=n=3:v=0:a=1[aout]"
+                    elif fade_in_duration > 0 or fade_out_duration > 0:
+                        filter_str = "[0:a][1:a]concat=n=2:v=0:a=1[aout]"
+                    else:
+                        filter_str = "[0:a]acopy[aout]"
+                    extend_cmd = ["ffmpeg", "-y"]
+                    for inp in audio_inputs:
+                        extend_cmd += inp.split()
+                    extend_cmd += [
+                        "-filter_complex", filter_str,
+                        "-map", "[aout]", "-ac", "2", "-ar", "44100", extended_audio_path
+                    ]
+                    safe_subprocess_run(extend_cmd, f"Create extended audio for segment {segment_id}", logger)
+                audio_input_path = extended_audio_path
+
+            # Build filter chains for transitions
+            # Video input: overlay transitions (fade over existing frames, no duration extension)
+            # Image input: additive transitions (extend duration with fade in/out periods)
             video_filters = ["scale=1920:1080", "format=yuv420p"]
             audio_filters = ["volume=1.5"]
-            
-            # Calculate extended duration for additive fade approach
-            fade_in_duration = 0.0
-            fade_out_duration = 0.0
-            fade_in_type = "fade"
-            fade_out_type = "fade"
-            
-            # Apply transition-in effects (extends at beginning)
-            if transition_in.get("type") and transition_in.get("duration", 0) > 0:
-                fade_in_duration = float(transition_in["duration"])
-                fade_in_type = transition_in.get("type", "fade").lower()
-                
-                # Check if this transition type can be preprocessed
+            fade_in_duration = float(transition_in.get("duration", 0) or 0)
+            fade_out_duration = float(transition_out.get("duration", 0) or 0)
+            fade_in_type = transition_in.get("type", "fade").lower() if transition_in.get("type") else "fade"
+            fade_out_type = transition_out.get("type", "fade").lower() if transition_out.get("type") else "fade"
+
+            if fade_in_duration > 0:
                 if self._is_preprocessing_supported(fade_in_type):
                     self._apply_transition_in_filter(video_filters, audio_filters, fade_in_type, fade_in_duration)
-                    logger.debug(f"Applied {fade_in_type} transition-in: {fade_in_duration}s (additive)")
+                    logger.debug(f"Applied {fade_in_type} transition-in: {fade_in_duration}s ({'overlay' if input_type == 'video' else 'additive'})")
                 else:
                     logger.warning(f"Transition-in type '{fade_in_type}' not supported for preprocessing, using basic fade")
                     fade_in_type = "fade"
                     video_filters.append(f"fade=t=in:st=0:d={fade_in_duration}")
                     audio_filters.append(f"afade=t=in:st=0:d={fade_in_duration}")
-            
-            # Get original audio duration
-            original_audio_duration = 0.0
-            try:
-                probe_cmd = [
-                    "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                    "-of", "csv=p=0", audio_path
-                ]
-                result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-                original_audio_duration = float(result.stdout.strip())
-                logger.debug(f"Original audio duration: {original_audio_duration}s")
-            except (ValueError, AttributeError, subprocess.CalledProcessError) as e:
-                logger.warning(f"Could not get audio duration for segment {segment_id}: {e}")
-                original_audio_duration = 4.0  # Fallback
-            
-            # Apply transition-out effects (extends at end)
-            if transition_out.get("type") and transition_out.get("duration", 0) > 0:
-                fade_out_duration = float(transition_out["duration"])
-                fade_out_type = transition_out.get("type", "fade").lower()
-                
-                # Check if this transition type can be preprocessed
+
+            if fade_out_duration > 0:
+                # For video input: fade out starts relative to original video, not extended duration
+                fade_out_start = max(0, original_duration - fade_out_duration) if input_type == "video" else fade_in_duration + original_duration
                 if self._is_preprocessing_supported(fade_out_type):
-                    # Calculate fade-out start time for additive approach
-                    fade_out_start = fade_in_duration + original_audio_duration
                     self._apply_transition_out_filter(video_filters, audio_filters, fade_out_type, fade_out_duration, fade_out_start)
-                    logger.debug(f"Applied {fade_out_type} transition-out: {fade_out_duration}s starting at {fade_out_start}s (additive)")
+                    logger.debug(f"Applied {fade_out_type} transition-out: {fade_out_duration}s starting at {fade_out_start}s ({'overlay' if input_type == 'video' else 'additive'})")
                 else:
                     logger.warning(f"Transition-out type '{fade_out_type}' not supported for preprocessing, using basic fade")
                     fade_out_type = "fade"
-                    fade_out_start = fade_in_duration + original_audio_duration
                     video_filters.append(f"fade=t=out:st={fade_out_start}:d={fade_out_duration}")
                     audio_filters.append(f"afade=t=out:st={fade_out_start}:d={fade_out_duration}")
-            
-            # Calculate total extended duration
-            total_duration = fade_in_duration + original_audio_duration + fade_out_duration
-            logger.info(f"Segment {segment_id} - Original: {original_audio_duration}s, With fades: {total_duration}s")
-            
-            # Log voice timing for clarity
-            voice_over = segment.get("voice_over", {})
-            vo_start_delay = float(voice_over.get("start_delay", 0))
-            actual_voice_start_time = fade_in_duration + vo_start_delay
-            logger.debug(f"Voice timing - Fade-in: {fade_in_duration}s, VO delay: {vo_start_delay}s, "
-                        f"Actual voice start: {actual_voice_start_time}s")
-            
-            # Create extended audio track for additive fades
-            extended_audio_path = audio_path
-            if fade_in_duration > 0 or fade_out_duration > 0:
-                extended_audio_path = os.path.join(temp_dir, f"extended_audio_{segment_id}.wav")
-                
-                # Build audio extension command
-                audio_inputs = []
-                audio_filters = []
-                
-                # Add silence at beginning for fade-in
-                if fade_in_duration > 0:
-                    audio_inputs.append(f"-f lavfi -t {fade_in_duration} -i anullsrc=channel_layout=stereo:sample_rate=44100")
-                
-                # Add original audio
-                audio_inputs.append(f"-i {audio_path}")
-                
-                # Add silence at end for fade-out
-                if fade_out_duration > 0:
-                    audio_inputs.append(f"-f lavfi -t {fade_out_duration} -i anullsrc=channel_layout=stereo:sample_rate=44100")
-                
-                # Concatenate all audio parts
-                if fade_in_duration > 0 and fade_out_duration > 0:
-                    filter_str = "[0:a][1:a][2:a]concat=n=3:v=0:a=1[aout]"
-                elif fade_in_duration > 0:
-                    filter_str = "[0:a][1:a]concat=n=2:v=0:a=1[aout]"
-                elif fade_out_duration > 0:
-                    filter_str = "[0:a][1:a]concat=n=2:v=0:a=1[aout]"
-                else:
-                    filter_str = "[0:a]acopy[aout]"
-                
-                extend_cmd = ["ffmpeg", "-y"]
-                for inp in audio_inputs:
-                    extend_cmd += inp.split()
-                extend_cmd += [
-                    "-filter_complex", filter_str,
-                    "-map", "[aout]", "-ac", "2", "-ar", "44100", extended_audio_path
-                ]
-                
-                safe_subprocess_run(extend_cmd, f"Create extended audio for segment {segment_id}", logger)
-            
-            # Prepare ffmpeg command with extended audio for additive fades
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-loop", "1",
-                "-i", processed_bg_path,
-                "-i", extended_audio_path,
-                "-vf", ",".join(video_filters),
-                "-af", "volume=1.5",  # Simple volume adjustment for extended audio
-                "-t", str(total_duration),
-                "-pix_fmt", "yuv420p",
-                "-r", str(video_config.default_fps),
-                "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", segment_output_path
-            ]
 
+            # For video input: use original duration (no extension), for image: use extended duration
+            total_duration = original_duration if input_type == "video" else fade_in_duration + original_duration + fade_out_duration
+
+            # Build ffmpeg command
+            if input_type == "video":
+                # Add silent audio track to ensure stream consistency with image+audio segments
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                    "-i", input_path,
+                    "-vf", ",".join(video_filters),
+                    "-af", ",".join(audio_filters),
+                    "-t", str(total_duration),
+                    "-map", "1:v", "-map", "0:a",
+                    "-pix_fmt", "yuv420p",
+                    "-r", str(video_config.default_fps),
+                    "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", segment_output_path
+                ]
+            else:
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-loop", "1",
+                    "-i", input_path,
+                    "-i", audio_input_path,
+                    "-vf", ",".join(video_filters),
+                    "-af", ",".join(audio_filters),
+                    "-t", str(total_duration),
+                    "-pix_fmt", "yuv420p",
+                    "-r", str(video_config.default_fps),
+                    "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", segment_output_path
+                ]
             safe_subprocess_run(ffmpeg_cmd, f"Create segment clip {segment_id}", logger)
             return segment_output_path
 
         except SubprocessError as e:
-            # Convert SubprocessError to VideoCreationError for service layer
             raise VideoCreationError(str(e)) from e
         except Exception as e:
             logger.error(f"Failed to create segment clip: {e}", exc_info=True)
