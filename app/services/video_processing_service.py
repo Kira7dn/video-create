@@ -172,6 +172,7 @@ class VideoProcessingService:
             # Image input: additive transitions (extend duration with fade in/out periods)
             video_filters = ["scale=1920:1080", "format=yuv420p"]
             audio_filters = ["volume=1.5"]
+
             fade_in_duration = float(transition_in.get("duration", 0) or 0)
             fade_out_duration = float(transition_out.get("duration", 0) or 0)
             fade_in_type = transition_in.get("type", "fade").lower() if transition_in.get("type") else "fade"
@@ -201,6 +202,48 @@ class VideoProcessingService:
 
             # For video input: use original duration (no extension), for image: use extended duration
             total_duration = original_duration if input_type == "video" else fade_in_duration + original_duration + fade_out_duration
+
+            # Add text overlays if present (support array of text_over)
+            text_overs = segment.get("text_over")
+            if text_overs:
+                if not isinstance(text_overs, list):
+                    raise VideoCreationError("text_over must be an array of objects")
+                for text_over in text_overs:
+                    if text_over.get("text"):
+                        # Simple and conservative text handling for FFmpeg drawtext
+                        safe_text = text_over['text']  # No escaping for now, just use raw text
+                        
+                        # Calculate end time based on segment duration if not specified
+                        text_end = text_over.get('end')
+                        if text_end is None:
+                            text_end = min(5, total_duration)  # Default to 5s or segment duration, whichever is smaller
+                        
+                        # Validate font file exists
+                        font_file = text_over.get('font_file', 'fonts/Roboto-Bold.ttf')
+                        if not os.path.exists(font_file) and not font_file.startswith('/'):
+                            # Try relative to current directory
+                            font_file = os.path.join(os.getcwd(), font_file)
+                            if not os.path.exists(font_file):
+                                logger.warning(f"Font file not found: {font_file}, using system default")
+                                font_file = "Arial"  # Fallback to system font
+                        
+                        drawtext_args = [
+                            f"fontfile={font_file}" if os.path.exists(font_file) else f"font={font_file}",
+                            f"text={safe_text}",  # Use text without quotes (rely on escaping)
+                            f"fontcolor={text_over.get('font_color', 'white')}",
+                            f"fontsize={text_over.get('font_size', 48)}",
+                            f"x={text_over.get('x', '(w-text_w)/2')}",
+                            f"y={text_over.get('y', 'h-100')}",
+                            f"enable='between(t,{text_over.get('start', 0)},{text_end})'"
+                        ]
+                        if text_over.get('box'):
+                            drawtext_args.append("box=1")
+                            drawtext_args.append(f"boxcolor={text_over.get('box_color', 'black@0.5')}")
+                            drawtext_args.append(f"boxborderw={text_over.get('boxborderw', 10)}")
+                        
+                        drawtext_filter = "drawtext=" + ":".join(drawtext_args)
+                        logger.info(f"Adding drawtext filter: {drawtext_filter}")
+                        video_filters.append(drawtext_filter)
 
             # Build ffmpeg command
             if input_type == "video":
