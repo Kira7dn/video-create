@@ -441,27 +441,6 @@ async def build_processing_pipeline(self) -> VideoPipeline:
     return pipeline
 ```
 
-### **Testing Pattern**
-```python
-# REQUIRED: Use comprehensive mocking and async patterns
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
-
-@pytest.mark.asyncio
-async def test_processor_functionality():
-    # Mock dependencies
-    mock_metrics = Mock()
-    processor = MyProcessor(mock_metrics)
-    
-    # Test valid case
-    result = await processor.process(valid_input)
-    assert result is not None
-    
-    # Test error case
-    with pytest.raises(ProcessingError):
-        await processor.process(invalid_input)
-```
-
 ## 🎯 **EXISTING FEATURES TO RESPECT**
 
 ### **Current Capabilities - DO NOT BREAK**
@@ -476,6 +455,7 @@ async def test_processor_functionality():
 - ✅ Performance metrics and monitoring
 - ✅ Async download service
 - ✅ Unified configuration system
+- ✅ Optional: AI-powered schema validation with PydanticAI (if enabled)
 
 ### **Test Coverage - MAINTAIN STANDARDS**
 - ✅ **13/13 refactored architecture tests passing** - Core pipeline and processor tests
@@ -486,6 +466,47 @@ async def test_processor_functionality():
 - ✅ Pipeline execution and stage management
 - ✅ Processor unit tests and mocking
 - ⚠️ **Integration tests fail without running server** - Expected behavior
+
+---
+
+## 🤖 **PYDANTICAI INTEGRATION GUIDELINES (UPDATED)**
+
+### **When to Use**
+- Use PydanticAI for advanced schema validation, hallucination detection, or dynamic schema generation for video creation requests.
+- Do NOT replace all traditional validation—use as an additional validation layer.
+
+### **How to Integrate (UPDATED)**
+1. **Create a new processor** in `app/services/processors/` (e.g., `pydantic_ai_validator.py`) inheriting from `Validator`.
+2. **Implement validation** using PydanticAI (e.g., `validate_with_ai(data)`), returning a `ValidationResult`.
+3. **Add the processor as a stage** in the pipeline using `add_processor_stage` in `VideoPipeline`.
+4. **Configure enable/disable** via `settings.py` (e.g., `ai_pydantic_enabled: bool = True`).
+5. **Log errors and handle exceptions** using specific exception types (`ProcessingError`, etc.).
+6. **Write unit tests** for the new processor, mocking PydanticAI responses.
+
+### **Pipeline Usage (UPDATED)**
+```python
+from app.services.processors.pydantic_ai_validator import PydanticAIValidator
+pipeline.add_processor_stage(
+    name="ai_schema_validation",
+    processor=PydanticAIValidator(),
+    input_key="json_data",
+    output_key="json_data"  # Overwrite json_data with validated version
+)
+```
+- **Note:** Downstream stages should always use `json_data` as the unified key for input, regardless of AI validation enabled/disabled.
+- Do NOT use `validated_data` key anymore; keep pipeline context simple and consistent.
+
+### **Settings Example**
+```python
+ai_pydantic_enabled: bool = True
+ai_pydantic_model: str = "gpt-4"
+```
+
+### **Compliance**
+- Do NOT mix PydanticAI logic with business logic.
+- Do NOT create config files outside `settings.py`.
+- Always log and handle errors gracefully.
+- Always write tests for new validation logic.
 
 ---
 

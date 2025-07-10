@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     ngrok_authtoken: str = ""
     ngrok_url: str = ""
 
+    # AI Pydantic Settings
+    ai_pydantic_enabled: bool = True
+    ai_pydantic_model: str = "gpt-4.1-nano"
+
+    # OpenAI API Key
+    openai_api_key: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

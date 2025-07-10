@@ -23,7 +23,7 @@ class VideoRequestValidator(Validator):
             "text_overlay", "transition_in", "transition_out", "duration"
         ]
         self.supported_asset_types = ["image", "video", "voice_over", "background_music"]
-        self.supported_transition_types = ["fade", "slide", "zoom", "dissolve"]
+        self.supported_transition_types = ["fade", "fadeblack", "fadewhite", "cut"]
     
     def validate(self, data: Dict[str, Any]) -> ValidationResult:
         """Validate video creation request data"""

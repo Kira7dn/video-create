@@ -27,6 +27,7 @@ from app.services.processors.batch_processor import SegmentBatchProcessor
 from app.services.processors.pipeline import (
     VideoPipeline, PipelineContext, FunctionPipelineStage
 )
+from app.services.processors.pydantic_ai_validator import PydanticAIValidator
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +111,14 @@ class VideoCreationServiceV2:
     ) -> str:
         """Process video creation using pipeline pattern"""
         # Create pipeline context
+        context_data = {
+            "json_data": json_data,
+            "segments": json_data.get("segments", []),
+            "transitions": json_data.get("transitions", []),
+            "background_music": json_data.get("background_music")
+        }
         context = PipelineContext(
-            data={
-                "json_data": json_data,
-                "segments": json_data.get("segments", []),
-                "transitions": json_data.get("transitions", []),
-                "background_music": json_data.get("background_music")
-            },
+            data=context_data,
             temp_dir=temp_dir,
             video_id=video_id,
             metadata={"start_time": time.time()}
@@ -136,6 +138,15 @@ class VideoCreationServiceV2:
     def _build_video_pipeline(self) -> VideoPipeline:
         """Build the video processing pipeline"""
         pipeline = VideoPipeline(self.metrics_collector)
+
+        # Optional: AI schema validation stage (overwrites json_data if enabled)
+        if settings.ai_pydantic_enabled:
+            pipeline.add_processor_stage(
+                name="ai_schema_validation",
+                processor=PydanticAIValidator(),
+                input_key="json_data",
+                output_key="json_data"  # Overwrite original json_data with validated version
+            )
 
         # Stage 1: Download assets
         pipeline.add_function_stage(
@@ -174,7 +185,6 @@ class VideoCreationServiceV2:
     async def _download_assets_stage(self, context: PipelineContext) -> tuple:
         """Pipeline stage for downloading assets"""
         json_data = context.get("json_data")
-        
         try:
             async with DownloadService() as download_service:
                 segment_results, background_music_result = await download_service.batch_download_segments(

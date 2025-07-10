@@ -19,6 +19,7 @@ aiohttp==3.9.5
 aiofiles==23.2.0
 gtts==2.5.1
 filelock==3.13.1
+pydantic-ai
 
 # Development tools
 pytest==8.4.1
