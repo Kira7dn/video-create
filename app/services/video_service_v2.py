@@ -163,18 +163,10 @@ class VideoCreationServiceV2:
                 name="image_auto",
                 processor=ImageAutoProcessor(),
                 input_key="download_results",
-                output_key="download_results"
+                output_key="processed_segments"
             )
 
-        # Stage 2: Process segments
-        pipeline.add_function_stage(
-            name="process_segments", 
-            func=self._process_segments_stage,
-            output_key="processed_segments",
-            required_inputs=["segments", "download_results"]
-        )
-
-        # Stage 3: Create segment clips
+        # Stage 2: Create segment clips (dùng processed_segments)
         pipeline.add_function_stage(
             name="create_segment_clips",
             func=self._create_segment_clips_stage,
@@ -182,7 +174,7 @@ class VideoCreationServiceV2:
             required_inputs=["processed_segments"]
         )
 
-        # Stage 4: Concatenate final video
+        # Stage 3: Concatenate final video
         pipeline.add_function_stage(
             name="concatenate_video",
             func=self._concatenate_video_stage,
@@ -204,64 +196,25 @@ class VideoCreationServiceV2:
         except Exception as e:
             raise DownloadError(f"Failed to download assets: {e}") from e
 
-    def _process_segments_stage(self, context: PipelineContext) -> List[Dict]:
-        """Pipeline stage for processing segments with download results"""
-        segments = context.get("segments")
-        download_results = context.get("download_results")
-        
-        if not download_results or len(download_results) != 2:
-            raise ProcessingError("Invalid download results format")
-        segment_results, _ = download_results
-        if len(segments) != len(segment_results):
-            raise ProcessingError(
-                f"Segment count mismatch: {len(segments)} vs {len(segment_results)}"
-            )
-        # Tạo mapping từ id -> segment gốc
-        segment_map = {str(seg["id"]): seg for seg in segments if "id" in seg}
-        processed_segments = []
-        for download_result in segment_results:
-            # Lấy id từ asset (ưu tiên asset_type đầu tiên)
-            asset_ids = [asset_obj.get("id") for asset_obj in download_result.values() if asset_obj.get("id")]
-            if not asset_ids:
-                raise ProcessingError("Download result missing 'id' field for asset.")
-            seg_id = str(asset_ids[0])
-            segment = segment_map.get(seg_id)
-            if not segment:
-                raise ProcessingError(f"No segment found for id: {seg_id}")
-            processed_segment = segment.copy()
-            # Merge asset objects vào segment, luôn merge local_path
-            for asset_type, asset_obj in download_result.items():
-                if asset_type not in processed_segment:
-                    processed_segment[asset_type] = asset_obj
-                else:
-                    # Merge local_path và các field khác từ download result
-                    processed_segment[asset_type].update(asset_obj)
-            
-            processed_segments.append(processed_segment)
-        return processed_segments
-
     def _create_segment_clips_stage(self, context: PipelineContext) -> List[Dict[str, str]]:
         """Pipeline stage for creating individual segment clips"""
         processed_segments = context.get("processed_segments")
+        if not processed_segments:
+            raise ProcessingError("processed_segments not found in context")
         
         try:
             with managed_resources() as resource_manager:
                 video_processor = VideoProcessingService(resource_manager)
-                
-                # Use batch processor for segment creation
                 from app.services.processors.segment_processor import SegmentProcessor
                 batch_processor = SegmentBatchProcessor(
                     processor_func=SegmentProcessor.create_segment_clip,
                     metrics_collector=self.metrics_collector
                 )
-                
                 clip_paths = batch_processor.process_batch(
-                    processed_segments, 
+                    processed_segments,
                     temp_dir=context.temp_dir
                 )
-                
                 return clip_paths
-                
         except Exception as e:
             raise ProcessingError(f"Failed to create segment clips: {e}") from e
 

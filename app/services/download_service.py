@@ -66,8 +66,10 @@ class DownloadService:
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
+                # Stream large files to avoid memory issues
                 async with aiofiles.open(dest_path, "wb") as f:
-                    await f.write(await response.read())
+                    async for chunk in response.content.iter_chunked(8192):
+                        await f.write(chunk)
 
                 logger.debug(f"✅ Downloaded {url} to {dest_path}")
                 return DownloadResult(success=True, local_path=dest_path)
@@ -145,21 +147,21 @@ class DownloadService:
             return_exceptions=False,
         )
 
-        asset_result = {}
+        asset_result = dict(segment)  # Trả về copy của segment gốc
         for task, result in zip(download_tasks, results):
             if not result.success:
-                logger.error(f"Download failed for {task.asset_type}: {result.error}")
-                raise VideoCreationError(
-                    f"Failed to download {task.asset_type}: {result.error}"
-                )
-            # Copy object gốc, chỉ bổ sung local_path và id
-            asset_obj = segment.get(task.asset_type, {})
-            asset_info = dict(asset_obj) if isinstance(asset_obj, dict) else {}
-            asset_info["url"] = task.url  # Đảm bảo luôn có url
-            asset_info["local_path"] = result.local_path
-            asset_info["id"] = segment_id  # Bổ sung id để downstream mapping
-            asset_result[task.asset_type] = asset_info
-
+                # Nếu là image thì chỉ warning, không throw error
+                if task.asset_type == "image":
+                    logger.warning(f"Download failed for {task.asset_type}: {result.error} (will be replaced in next step)")
+                    continue
+                else:
+                    logger.error(f"Download failed for {task.asset_type}: {result.error}")
+                    raise VideoCreationError(
+                        f"Failed to download {task.asset_type}: {result.error}"
+                    )
+            asset_info = asset_result.get(task.asset_type, {})
+            if isinstance(asset_info, dict):
+                asset_info["local_path"] = result.local_path  # Chỉ chèn local_path vào dict gốc
         return asset_result
 
     async def batch_download_segments(

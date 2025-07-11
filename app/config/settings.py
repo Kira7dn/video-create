@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     ffmpeg_threads: int = 0  # 0 = auto
 
     # Download Settings
-    download_timeout: int = 30
+    download_timeout: int = 300  # 5 minutes for large video files
     download_max_concurrent: int = 10
     download_retry_attempts: int = 3
 

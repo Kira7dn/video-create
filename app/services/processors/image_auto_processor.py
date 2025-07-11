@@ -137,28 +137,20 @@ Guidelines:
             context = kwargs.get('context')
             if not context:
                 raise ProcessingError("Context is required for ImageAutoProcessor")
-            segments = context.get("segments")
-            if not segments:
-                raise ProcessingError("Segments not found in context")
             if not download_results or len(download_results) != 2:
                 raise ProcessingError("Invalid download results format")
             segment_results, background_music_result = download_results
-            if len(segments) != len(segment_results):
-                raise ProcessingError(
-                    f"Segment count mismatch: {len(segments)} vs {len(segment_results)}"
-                )
             min_width = settings.video_min_image_width
             min_height = settings.video_min_image_height
-            pixabay_key = settings.pixabay_api_key
             temp_dir = context.get('temp_dir') if isinstance(context, dict) else context.temp_dir
             if not temp_dir:
                 raise ProcessingError("temp_dir is required in context")
             new_segment_results = []
-            for segment, asset_dict in zip(segments, segment_results):
-                image_obj = asset_dict.get("image", {})
+            for segment in segment_results:
+                image_obj = segment.get("image", {})
                 image_path = image_obj.get("local_path")
-                prompt = segment.get("text") or segment.get("title") or ""
-                merged_asset = asset_dict.copy()
+                prompt = segment.get("voice_over", {}).get("content", "") or ""
+                merged_asset = segment.copy()
                 valid = False
                 if image_path:
                     valid = is_image_size_valid(image_path, min_width, min_height)
@@ -176,15 +168,20 @@ Guidelines:
                             r.raise_for_status()
                             with open(new_path, 'wb') as f:
                                 shutil.copyfileobj(r.raw, f)
-                        merged_asset["image"] = {
-                            "url": new_url,
-                            "local_path": new_path
-                        }
+                        # Cập nhật merged_asset với url và local_path mới
+                        if "image" in merged_asset and isinstance(merged_asset["image"], dict):
+                            merged_asset["image"]["url"] = new_url
+                            merged_asset["image"]["local_path"] = new_path
+                        else:
+                            merged_asset["image"] = {
+                                "url": new_url,
+                                "local_path": new_path
+                            }
                     except Exception as e:
                         raise ProcessingError(f"Download replacement image failed: {e}")
                 new_segment_results.append(merged_asset)
             self._end_processing(metric, success=True, items_processed=len(new_segment_results))
-            return (new_segment_results, background_music_result)
+            return new_segment_results
         except Exception as e:
             self._end_processing(metric, success=False, error_message=str(e))
             raise ProcessingError(f"Image validation/search failed: {e}") from e

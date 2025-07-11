@@ -57,6 +57,8 @@ app/services/
 ├── video_processing_service.py  # Processing coordinator (MINIMAL LOGIC)
 ├── download_service.py          # Asset downloading (ASYNC)
 ├── resource_manager.py          # Resource management (CONTEXT MANAGERS)
+├── audio_effects_service.py     # Audio effects and processing
+├── performance_utils.py         # Performance monitoring utilities
 └── processors/                  # Specialized processors (NEW ARCHITECTURE)
     ├── base_processor.py        # Abstract base classes (METRICS + SRP)
     ├── validation_processor.py  # Input validation (COMPREHENSIVE)
@@ -67,6 +69,8 @@ app/services/
     ├── concatenation_processor.py # Video concatenation (FFMPEG)
     ├── batch_processor.py       # Batch operations (CONCURRENCY)
     ├── image_auto_processor.py  # AI-powered image validation & replacement (PYDANTIC-AI)
+    ├── ai_image_searcher.py     # AI-enhanced image search functionality
+    ├── pydantic_ai_validator.py # PydanticAI validation components
     └── pipeline.py              # Pipeline pattern (ASYNC STAGES)
 ```
 
@@ -261,6 +265,65 @@ async def test_full_video_creation():
         assert os.path.exists(result)
 ```
 
+## 🧪 **DEVELOPMENT WORKFLOWS - ESSENTIAL COMMANDS**
+
+### **Testing Workflow - FOLLOW THESE PATTERNS**
+```powershell
+# Run all tests (68 tests total)
+python -m pytest test/ -v
+
+# Run specific test categories
+python -m pytest test/test_refactored_architecture.py -v    # Architecture tests
+python -m pytest test/test_ai_keyword_extraction.py -v     # AI integration tests
+python -m pytest test/test_text_overlay.py -v              # Text overlay tests
+python -m pytest test/test_transition_*.py -v              # Transition effect tests
+
+# Run integration tests (requires running server)
+python -m pytest test/test_integration.py -v               # API integration tests
+
+# Test collection only (see test structure)
+python -m pytest test/ --collect-only
+```
+
+### **Development Setup - REQUIRED STEPS**
+```powershell
+# 1. Install dependencies
+pip install -r requirements.dev.txt
+
+# 2. Run development server
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 3. Docker development
+docker-compose up --build    # Full stack with ngrok tunnel
+docker build -t video-create .    # Build production image
+
+# 4. Test AI features (requires OpenAI API key)
+python demo_ai_keywords.py    # Demo PydanticAI keyword extraction
+```
+
+### **Environment Configuration - MANDATORY**
+```bash
+# .env file required for AI features
+OPENAI_API_KEY=your-api-key-here
+AI_KEYWORD_EXTRACTION_ENABLED=true
+AI_PYDANTIC_MODEL=gpt-3.5-turbo
+AI_MAX_KEYWORDS_PER_PROMPT=5
+
+# Performance settings
+PERFORMANCE_MAX_CONCURRENT_SEGMENTS=3
+PERFORMANCE_MAX_MEMORY_MB=2048
+DOWNLOAD_MAX_CONCURRENT=5
+```
+
+### **Key Development Files - UNDERSTAND THESE**
+```
+test/input_sample.json           # Sample video creation request format
+demo_ai_keywords.py             # PydanticAI keyword extraction demo
+utils/image_utils.py            # Image processing utilities (smart padding)
+pytest.ini                      # Test configuration (pythonpath, maxfail)
+requirements.prod.txt           # Production dependencies (includes pydantic-ai)
+```
+
 ## 🚀 **PERFORMANCE GUIDELINES - RESPECT EXISTING LIMITS**
 
 ### **Memory Management - USE EXISTING INFRASTRUCTURE**
@@ -360,257 +423,20 @@ async def test_full_video_creation():
 - [ ] Are memory resources managed properly?
 - [ ] Have I tested error scenarios?
 
-## 🛠️ **MANDATORY CODE PATTERNS - ENFORCE STRICTLY**
+## ---
 
-### **Error Handling Pattern**
-```python
-# REQUIRED: Always use specific exception types with context
-from app.core.exceptions import ProcessingError, DownloadError, VideoCreationError
+## 📋 **SUMMARY FOR AI AGENTS**
 
-try:
-    result = some_operation()
-except SpecificException as e:
-    logger.error(f"Operation failed: {e}", exc_info=True)
-    raise ProcessingError(f"Processing failed: {e}") from e
-```
-
-### **Resource Management Pattern**
-```python
-# REQUIRED: Always use async context managers
-from app.services.resource_manager import managed_temp_directory
-
-async def some_function():
-    async with managed_temp_directory() as temp_dir:
-        # Your processing logic here
-        result = await process_data(temp_dir)
-        return result
-    # Cleanup happens automatically
-```
-
-### **Settings Usage Pattern**
-```python
-# REQUIRED: Always import and use unified settings
-from app.config.settings import settings
-
-# Use settings with proper grouping
-timeout = settings.download_timeout
-quality = settings.video_quality
-max_concurrent = settings.performance_max_concurrent_segments
-```
-
-### **Processor Implementation Pattern**
-```python
-# REQUIRED: Always inherit from BaseProcessor
-from app.services.processors.base_processor import BaseProcessor, ProcessingStage
-
-class MyProcessor(BaseProcessor):
-    def __init__(self, metrics_collector: Optional[MetricsCollector] = None):
-        super().__init__(metrics_collector)
-    
-    async def process(self, input_data: Any, **kwargs) -> Any:
-        metric = self._start_processing(ProcessingStage.MY_STAGE)
-        try:
-            result = await self._do_processing(input_data)
-            self._end_processing(metric, success=True, items_processed=1)
-            return result
-        except Exception as e:
-            self._end_processing(metric, success=False, error_message=str(e))
-            raise ProcessingError(f"Processing failed: {e}") from e
-```
-
-### **Pipeline Usage Pattern**
-```python
-# REQUIRED: Use VideoPipeline for complex workflows
-from app.services.processors.pipeline import VideoPipeline, PipelineContext
-
-async def build_processing_pipeline(self) -> VideoPipeline:
-    pipeline = VideoPipeline(self.metrics_collector)
-    
-    pipeline.add_processor_stage(
-        name="validation",
-        processor=self.validation_processor,
-        input_key="raw_data",
-        output_key="validated_data"
-    )
-    
-    pipeline.add_function_stage(
-        name="processing",
-        func=self._process_data,
-        output_key="processed_data",
-        required_inputs=["validated_data"]
-    )
-    
-    return pipeline
-```
-
-## 🎯 **EXISTING FEATURES TO RESPECT**
-
-### **Current Capabilities - DO NOT BREAK**
-- ✅ Text overlay with fade-in/fade-out effects
-- ✅ Multiple transition types (fade, slide, zoom, dissolve)
-- ✅ Audio composition with background music
-- ✅ Image smart padding and processing
-- ✅ Batch segment processing with concurrency
-- ✅ Pipeline-based video creation workflow
-- ✅ Comprehensive input validation
-- ✅ Resource management and cleanup
-- ✅ Performance metrics and monitoring
-- ✅ Async download service
-- ✅ Unified configuration system
-- ✅ **PydanticAI-powered keyword extraction** (ImageAutoProcessor)
-- ✅ **AI-enhanced image search** with structured outputs
-- ✅ **Type-safe AI integrations** with automatic validation
-
-### **Test Coverage - MAINTAIN STANDARDS**
-- ✅ **13/13 refactored architecture tests passing** - Core pipeline and processor tests
-- ✅ **35/42 total tests passing** - Unit and logic tests all pass
-- ✅ Integration tests for video creation API (require running server)
-- ✅ Text overlay validation and processing
-- ✅ Error handling and edge cases
-- ✅ Pipeline execution and stage management
-- ✅ Processor unit tests and mocking
-- ⚠️ **Integration tests fail without running server** - Expected behavior
+- Follow strict separation of concerns and pipeline architecture.
+- Use only the provided configuration, error handling, and resource management patterns.
+- Reference sample input and test files for data formats and edge cases.
+- Always use project-specific exceptions and logging.
+- For AI features, ensure environment variables and settings are configured.
 
 ---
 
-## 🤖 **PYDANTICAI INTEGRATION GUIDELINES (UPDATED - PREFERRED APPROACH)**
-
-### **When to Use PydanticAI**
-- **PRIMARY CHOICE** for all AI integrations: keyword extraction, schema validation, content analysis
-- Use PydanticAI instead of direct OpenAI API calls for type safety and structured outputs
-- Ideal for any AI task requiring structured data validation and response parsing
-- **REPLACE** direct OpenAI API usage with PydanticAI Agents for better maintainability
-
-### **How to Integrate PydanticAI (MANDATORY PATTERN)**
-1. **Define Pydantic Models** for structured AI responses:
-```python
-from pydantic import BaseModel
-from typing import List
-
-class AIProcessingResult(BaseModel):
-    result_data: List[str]
-    primary_item: str
-    confidence_score: float = 0.0
-    processing_strategy: str = "default"
-```
-
-2. **Create PydanticAI Agents** in processor `__init__`:
-```python
-from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIModel
-
-def _init_ai_agent(self):
-    if self.ai_api_key and settings.ai_feature_enabled:
-        model = OpenAIModel(model_name=settings.ai_model_name)
-        self.ai_agent = Agent(
-            model=model,
-            result_type=AIProcessingResult,
-            system_prompt="Your AI task description..."
-        )
-```
-
-3. **Implement Async AI Processing**:
-```python
-async def _ai_process_data(self, input_data: str) -> List[str]:
-    if not self.ai_agent:
-        return [input_data]  # Fallback
-    
-    try:
-        result = await self.ai_agent.run(
-            user_prompt=f"Process: {input_data}",
-            message_history=[]
-        )
-        return result.data.result_data
-    except Exception as e:
-        logger.warning(f"AI processing failed: {e}")
-        return [input_data]  # Graceful fallback
-```
-
-4. **Pipeline Integration**:
-```python
-# Add async AI processor stages to pipeline
-pipeline.add_processor_stage(
-    name="ai_processing",
-    processor=self.ai_processor,
-    input_key="raw_data",
-    output_key="processed_data"
-)
-```
-
-### **Configuration Settings (FOLLOW EXISTING PATTERNS)**
-```python
-# app/config/settings.py - ADD TO EXISTING GROUPS
-class Settings(BaseSettings):
-    # AI Integration Settings (NEW SECTION)
-    openai_api_key: Optional[str] = None
-    ai_keyword_extraction_enabled: bool = True
-    ai_model_name: str = "gpt-3.5-turbo"
-    ai_keyword_extraction_timeout: int = 10
-    ai_max_keywords_per_prompt: int = 5
-    
-    # Feature-specific AI settings
-    ai_content_analysis_enabled: bool = True
-    ai_schema_validation_enabled: bool = True
-```
-
-### **Dependencies (UPDATED)**
-```python
-# requirements.prod.txt - REMOVE openai, USE pydantic-ai
-pydantic-ai  # PREFERRED - includes OpenAI integration
-# openai==1.58.1  # REMOVE - replaced by pydantic-ai
-```
-
-### **Testing PydanticAI (MANDATORY PATTERNS)**
-```python
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
-
-@patch('app.services.processors.my_processor.Agent')
-@patch('app.services.processors.my_processor.OpenAIModel')
-def test_ai_processing_success(self, mock_openai_model, mock_agent):
-    # Mock PydanticAI Agent response
-    mock_result = Mock()
-    mock_result.data = AIProcessingResult(
-        result_data=["processed1", "processed2"],
-        primary_item="processed1",
-        confidence_score=0.95
-    )
-    
-    mock_agent_instance = AsyncMock()
-    mock_agent_instance.run.return_value = mock_result
-    mock_agent.return_value = mock_agent_instance
-    
-    processor = MyProcessor(ai_api_key="test-key")
-    
-    import asyncio
-    result = asyncio.run(processor._ai_process_data("input"))
-    assert result == ["processed1", "processed2"]
-```
-
-### **Architecture Benefits of PydanticAI**
-✅ **Type Safety**: Compile-time validation for AI responses  
-✅ **Structured Output**: No manual string parsing required  
-✅ **Async Native**: Built-in async/await support  
-✅ **Error Handling**: Automatic validation and graceful fallbacks  
-✅ **Model Agnostic**: Easy switching between AI providers  
-✅ **Pydantic Integration**: Seamless with existing validation patterns
-
----
-
-## 🏆 **ARCHITECTURE BENEFITS ACHIEVED - MAINTAIN THESE**
-
-✅ **Maintainability**: Clear separation of concerns, single responsibility
-✅ **Scalability**: Pipeline pattern allows easy addition of new processing stages  
-✅ **Testability**: Each component can be tested independently
-✅ **Reliability**: Robust error handling and resource management
-✅ **Performance**: Metrics collection and optimization opportunities
-✅ **Flexibility**: Easy configuration and environment-based overrides
-✅ **Observability**: Comprehensive logging and monitoring capabilities
-✅ **Modularity**: Processor-based architecture with clear interfaces
-✅ **Async Support**: Full async/await pattern implementation
-✅ **Resource Safety**: Proper cleanup and memory management
-
-**This architecture is production-ready and follows industry best practices! 🚀**
+**Feedback Request:**
+If any section is unclear, incomplete, or missing important patterns, please provide feedback or examples. This will help further refine the copilot instructions for maximum productivity and compliance.
 
 ## 🔒 **VALIDATION ENFORCEMENT RULES - ZERO TOLERANCE**
 
@@ -676,3 +502,55 @@ If an AI agent encounters any pattern violations:
 *Architecture Version: 2.1 - PydanticAI Integration Complete*  
 *Test Status: AI Keyword Extraction Fully Tested*  
 *AI Agent Compliance: Mandatory PydanticAI for all AI integrations*
+
+## 🔗 **DATA FLOW & INTEGRATION POINTS**
+
+- **Input Format:**
+  - All video creation requests use a JSON format (see `test/input_sample.json`).
+  - Segments may include images, videos, voice_over, text_over, and transitions.
+  - Text overlays support advanced attributes (font, color, position, box, etc).
+
+- **External Dependencies:**
+  - **Pixabay API** for image search (see `utils/image_utils.py`, `image_auto_processor.py`).
+  - **PydanticAI** for AI-powered keyword extraction and validation (requires API key).
+  - **MoviePy, OpenCV, Pillow** for video/image/audio processing.
+  - **FastAPI** for API layer, with custom middleware and exception handling.
+
+- **Cross-Component Communication:**
+  - All processors communicate via `PipelineContext` (see `pipeline.py`).
+  - Resource management is handled via async context managers (`resource_manager.py`).
+  - Metrics and error handling are propagated through `MetricsCollector` and custom exceptions (`core/exceptions.py`).
+
+- **Configuration:**
+  - All settings are managed in `app/config/settings.py` (Pydantic Settings, .env overrides).
+  - Never create new config files; always extend the `Settings` class.
+
+- **Logging:**
+  - Logs are written to both console and `data/app.log` (see `main.py`).
+  - Use structured logging for error context and stack traces.
+
+## 🧩 **PROJECT-SPECIFIC CONVENTIONS & PATTERNS**
+
+- **Single Responsibility Principle (SRP):**
+  - Each processor/class must handle only one concern (see `base_processor.py`).
+  - Split multi-responsibility logic into separate processors.
+
+- **Pipeline Pattern:**
+  - All workflows use the pipeline approach (`pipeline.py`, `VideoPipeline`).
+  - Stages are modular, testable, and can be skipped/parallelized.
+
+- **Error Handling:**
+  - Use only project-specific exceptions: `DownloadError`, `ProcessingError`, `VideoCreationError`, `FileValidationError`.
+  - Always log errors with full context and stack trace.
+
+- **Resource Management:**
+  - Use async context managers for temp directories and resource cleanup (`resource_manager.py`).
+  - Monitor memory usage and clean up resources after processing.
+
+- **AI Integration:**
+  - Use PydanticAI for keyword extraction and validation (see `image_auto_processor.py`).
+  - Configure via `.env` and `settings.py` only.
+
+- **Testing Patterns:**
+  - Use parameterized and coroutine tests for processors and integration (see `test/test_refactored_architecture.py`, `test/test_image_auto_processor.py`).
+  - Test input/output formats and error handling explicitly.
