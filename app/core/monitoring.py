@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime
 from typing import Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SystemHealth(BaseModel):
@@ -20,6 +20,8 @@ class SystemHealth(BaseModel):
     disk_usage: Dict[str, Any]
     cpu_usage: float
     active_processes: int
+
+    model_config = ConfigDict()
 
 
 class HealthChecker:

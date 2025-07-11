@@ -20,6 +20,7 @@ class SegmentProcessor:
         video_obj = segment.get("video", {})
         bg_image_path = image_obj.get("local_path")
         video_path = video_obj.get("local_path")
+        
         transition_in = segment.get("transition_in", {})
         transition_out = segment.get("transition_out", {})
         segment_id = segment.get("id", str(uuid.uuid4()))

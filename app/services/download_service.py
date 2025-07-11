@@ -131,7 +131,9 @@ class DownloadService:
         self, segment: dict, temp_dir: str
     ) -> Dict[str, dict]:
         """Download all assets for a segment and return asset objects with local_path, url, start_delay, end_delay (nếu có)"""
-        segment_id = segment.get("id", str(uuid.uuid4()))
+        segment_id = segment.get("id")
+        if not segment_id:
+            raise VideoCreationError("Segment missing 'id' field. Please provide a unique id for each segment.")
         download_tasks = self._extract_download_tasks(segment, temp_dir, segment_id)
 
         if not download_tasks:
@@ -150,11 +152,12 @@ class DownloadService:
                 raise VideoCreationError(
                     f"Failed to download {task.asset_type}: {result.error}"
                 )
-            # Copy object gốc, chỉ bổ sung local_path
+            # Copy object gốc, chỉ bổ sung local_path và id
             asset_obj = segment.get(task.asset_type, {})
             asset_info = dict(asset_obj) if isinstance(asset_obj, dict) else {}
             asset_info["url"] = task.url  # Đảm bảo luôn có url
             asset_info["local_path"] = result.local_path
+            asset_info["id"] = segment_id  # Bổ sung id để downstream mapping
             asset_result[task.asset_type] = asset_info
 
         return asset_result

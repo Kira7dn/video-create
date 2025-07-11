@@ -133,9 +133,10 @@ class BatchProcessor(BaseProcessor):
 class ValidationResult:
     """Result of validation operation"""
     
-    def __init__(self, is_valid: bool = True, errors: Optional[List[str]] = None):
+    def __init__(self, is_valid: bool = True, errors: Optional[List[str]] = None, validated_data: Any = None):
         self.is_valid = is_valid
         self.errors = errors or []
+        self.validated_data = validated_data  # Lưu output đã chuẩn hóa nếu có
     
     def add_error(self, error: str):
         """Add validation error"""
@@ -158,10 +159,10 @@ class Validator(BaseProcessor):
     """Abstract base class for validators"""
     
     @abstractmethod
-    def validate(self, data: Any) -> ValidationResult:
+    async def validate(self, data: Any) -> ValidationResult:
         """Validate data and return validation result"""
         pass
     
-    def process(self, input_data: Any, **kwargs) -> ValidationResult:
+    async def process(self, input_data: Any, **kwargs) -> ValidationResult:
         """Process method that delegates to validate"""
-        return self.validate(input_data)
+        return await self.validate(input_data)

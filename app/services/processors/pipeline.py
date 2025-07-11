@@ -100,11 +100,30 @@ class ProcessorPipelineStage(PipelineStage):
         if input_data is None:
             raise ProcessingError(f"No input data found for key '{self.input_key}'")
         
-        # Execute processor
-        result = self.processor.process(input_data, context=context)
+        # Execute processor (handle both sync and async)
+        if asyncio.iscoroutinefunction(self.processor.process):
+            result = await self.processor.process(input_data, context=context)
+        else:
+            result = self.processor.process(input_data, context=context)
         
-        # Store result in context
-        context.set(self.output_key, result)
+        # If processor is a Validator, handle validation result
+        from app.services.processors.base_processor import Validator
+        from app.services.processors.pydantic_ai_validator import PydanticAIValidator
+        if isinstance(self.processor, Validator):
+            if not result.is_valid:
+                # For AI validators, fallback to original data with warning
+                if isinstance(self.processor, PydanticAIValidator):
+                    self.logger.warning(f"AI validation failed, using original data: {'; '.join(result.errors)}")
+                    context.set(self.output_key, input_data)  # Fallback to original input
+                else:
+                    # For critical validators, fail the pipeline
+                    raise ProcessingError(f"Validation failed: {'; '.join(result.errors)}")
+            else:
+                # Validation succeeded, use validated data if available
+                validated_data = result.validated_data if result.validated_data is not None else input_data
+                context.set(self.output_key, validated_data)
+        else:
+            context.set(self.output_key, result)
         
         return context
 

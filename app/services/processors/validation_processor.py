@@ -25,7 +25,7 @@ class VideoRequestValidator(Validator):
         self.supported_asset_types = ["image", "video", "voice_over", "background_music"]
         self.supported_transition_types = ["fade", "fadeblack", "fadewhite", "cut"]
     
-    def validate(self, data: Dict[str, Any]) -> ValidationResult:
+    async def validate(self, data: Dict[str, Any]) -> ValidationResult:
         """Validate video creation request data"""
         metric = self._start_processing(ProcessingStage.VALIDATION)
         result = ValidationResult()

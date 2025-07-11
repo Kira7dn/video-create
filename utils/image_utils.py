@@ -2,6 +2,8 @@ import cv2
 import os
 import numpy as np
 from typing import List, Union, Optional, Tuple
+from PIL import Image
+import requests
 
 
 def get_smart_pad_color(
@@ -267,3 +269,76 @@ def auto_enhance_image(
         enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
 
     return enhanced
+
+
+def is_image_size_valid(image_path: str, min_width: int, min_height: int) -> bool:
+    """
+    Kiểm tra kích thước ảnh có đạt chuẩn không.
+    """
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            return width >= min_width and height >= min_height
+    except Exception as e:
+        # Có thể log nếu cần
+        return False
+
+
+def search_pixabay_image(
+    prompt: str, api_key: str, min_width: int, min_height: int
+) -> Optional[str]:
+    """
+    Tìm kiếm ảnh từ Pixabay API theo prompt và filter theo kích thước tối thiểu.
+    Trả về url ảnh đầu tiên phù hợp hoặc None nếu không tìm thấy.
+    
+    Strategy:
+    1. Ưu tiên largeImageURL (thường có kích thước lớn hơn)
+    2. Fallback về webformatURL nếu không có large
+    3. Filter dựa trên webformat size (là size tối thiểu có sẵn)
+    """
+    url = "https://pixabay.com/api/"
+    params = {
+        "key": api_key,
+        "q": prompt,
+        "image_type": "photo",
+        "safesearch": "true",
+        "min_width": max(640, min_width // 2),  # Giảm yêu cầu Pixabay filter
+        "min_height": max(480, min_height // 2),  # Để tăng khả năng tìm thấy
+        "per_page": 10,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        hits = data.get("hits", [])
+        
+        for hit in hits:
+            # Ưu tiên largeImageURL (thường đủ lớn cho yêu cầu)
+            large_url = hit.get("largeImageURL")
+            web_url = hit.get("webformatURL")
+            
+            if large_url:
+                return large_url
+            elif web_url:
+                # Fallback to webformat nếu không có large
+                web_width = hit.get("webformatWidth", 0)
+                web_height = hit.get("webformatHeight", 0)
+                if web_width >= min_width // 2 and web_height >= min_height // 2:
+                    return web_url
+        
+        # Nếu không tìm được gì với filter, thử lại mà không filter size
+        if not hits:
+            params.pop("min_width", None)
+            params.pop("min_height", None)
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            hits = data.get("hits", [])
+            
+            if hits:
+                first_hit = hits[0]
+                return first_hit.get("largeImageURL") or first_hit.get("webformatURL")
+                
+    except Exception:
+        pass
+    return None

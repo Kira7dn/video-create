@@ -28,6 +28,7 @@ from app.services.processors.pipeline import (
     VideoPipeline, PipelineContext, FunctionPipelineStage
 )
 from app.services.processors.pydantic_ai_validator import PydanticAIValidator
+from app.services.processors.image_auto_processor import ImageAutoProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class VideoCreationServiceV2:
         self.metrics_collector = MetricsCollector()
         
         # Validate input data first
-        validation_result = self.validator.validate(json_data)
+        validation_result = await self.validator.validate(json_data)
         if not validation_result.is_valid:
             error_msg = f"Validation failed: {'; '.join(validation_result.errors)}"
             logger.error(error_msg)
@@ -156,6 +157,15 @@ class VideoCreationServiceV2:
             required_inputs=["json_data"]
         )
 
+        # Optional: Image auto validation/search stage
+        if settings.image_auto_enabled:
+            pipeline.add_processor_stage(
+                name="image_auto",
+                processor=ImageAutoProcessor(),
+                input_key="download_results",
+                output_key="download_results"
+            )
+
         # Stage 2: Process segments
         pipeline.add_function_stage(
             name="process_segments", 
@@ -201,24 +211,33 @@ class VideoCreationServiceV2:
         
         if not download_results or len(download_results) != 2:
             raise ProcessingError("Invalid download results format")
-        
         segment_results, _ = download_results
-        
         if len(segments) != len(segment_results):
             raise ProcessingError(
                 f"Segment count mismatch: {len(segments)} vs {len(segment_results)}"
             )
-
+        # Tạo mapping từ id -> segment gốc
+        segment_map = {str(seg["id"]): seg for seg in segments if "id" in seg}
         processed_segments = []
-        for segment, download_result in zip(segments, segment_results):
+        for download_result in segment_results:
+            # Lấy id từ asset (ưu tiên asset_type đầu tiên)
+            asset_ids = [asset_obj.get("id") for asset_obj in download_result.values() if asset_obj.get("id")]
+            if not asset_ids:
+                raise ProcessingError("Download result missing 'id' field for asset.")
+            seg_id = str(asset_ids[0])
+            segment = segment_map.get(seg_id)
+            if not segment:
+                raise ProcessingError(f"No segment found for id: {seg_id}")
             processed_segment = segment.copy()
-            
-            # Merge asset objects into segment
+            # Merge asset objects vào segment, luôn merge local_path
             for asset_type, asset_obj in download_result.items():
-                processed_segment[asset_type] = asset_obj
-
+                if asset_type not in processed_segment:
+                    processed_segment[asset_type] = asset_obj
+                else:
+                    # Merge local_path và các field khác từ download result
+                    processed_segment[asset_type].update(asset_obj)
+            
             processed_segments.append(processed_segment)
-
         return processed_segments
 
     def _create_segment_clips_stage(self, context: PipelineContext) -> List[Dict[str, str]]:

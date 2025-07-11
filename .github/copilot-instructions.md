@@ -66,6 +66,7 @@ app/services/
     ├── segment_processor.py     # Segment creation (IMAGE/VIDEO)
     ├── concatenation_processor.py # Video concatenation (FFMPEG)
     ├── batch_processor.py       # Batch operations (CONCURRENCY)
+    ├── image_auto_processor.py  # AI-powered image validation & replacement (PYDANTIC-AI)
     └── pipeline.py              # Pipeline pattern (ASYNC STAGES)
 ```
 
@@ -302,6 +303,7 @@ async def test_full_video_creation():
 6. **❌ NO** blocking operations in async contexts
 7. **❌ NO** monolithic classes - follow SRP
 8. **❌ NO** bypassing the pipeline pattern for complex workflows
+9. **❌ NO** direct OpenAI API calls - use PydanticAI Agents
 
 ## 🚨 **VIOLATION CONSEQUENCES - AUTOMATED REJECTION**
 
@@ -455,7 +457,9 @@ async def build_processing_pipeline(self) -> VideoPipeline:
 - ✅ Performance metrics and monitoring
 - ✅ Async download service
 - ✅ Unified configuration system
-- ✅ Optional: AI-powered schema validation with PydanticAI (if enabled)
+- ✅ **PydanticAI-powered keyword extraction** (ImageAutoProcessor)
+- ✅ **AI-enhanced image search** with structured outputs
+- ✅ **Type-safe AI integrations** with automatic validation
 
 ### **Test Coverage - MAINTAIN STANDARDS**
 - ✅ **13/13 refactored architecture tests passing** - Core pipeline and processor tests
@@ -469,44 +473,127 @@ async def build_processing_pipeline(self) -> VideoPipeline:
 
 ---
 
-## 🤖 **PYDANTICAI INTEGRATION GUIDELINES (UPDATED)**
+## 🤖 **PYDANTICAI INTEGRATION GUIDELINES (UPDATED - PREFERRED APPROACH)**
 
-### **When to Use**
-- Use PydanticAI for advanced schema validation, hallucination detection, or dynamic schema generation for video creation requests.
-- Do NOT replace all traditional validation—use as an additional validation layer.
+### **When to Use PydanticAI**
+- **PRIMARY CHOICE** for all AI integrations: keyword extraction, schema validation, content analysis
+- Use PydanticAI instead of direct OpenAI API calls for type safety and structured outputs
+- Ideal for any AI task requiring structured data validation and response parsing
+- **REPLACE** direct OpenAI API usage with PydanticAI Agents for better maintainability
 
-### **How to Integrate (UPDATED)**
-1. **Create a new processor** in `app/services/processors/` (e.g., `pydantic_ai_validator.py`) inheriting from `Validator`.
-2. **Implement validation** using PydanticAI (e.g., `validate_with_ai(data)`), returning a `ValidationResult`.
-3. **Add the processor as a stage** in the pipeline using `add_processor_stage` in `VideoPipeline`.
-4. **Configure enable/disable** via `settings.py` (e.g., `ai_pydantic_enabled: bool = True`).
-5. **Log errors and handle exceptions** using specific exception types (`ProcessingError`, etc.).
-6. **Write unit tests** for the new processor, mocking PydanticAI responses.
-
-### **Pipeline Usage (UPDATED)**
+### **How to Integrate PydanticAI (MANDATORY PATTERN)**
+1. **Define Pydantic Models** for structured AI responses:
 ```python
-from app.services.processors.pydantic_ai_validator import PydanticAIValidator
+from pydantic import BaseModel
+from typing import List
+
+class AIProcessingResult(BaseModel):
+    result_data: List[str]
+    primary_item: str
+    confidence_score: float = 0.0
+    processing_strategy: str = "default"
+```
+
+2. **Create PydanticAI Agents** in processor `__init__`:
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIModel
+
+def _init_ai_agent(self):
+    if self.ai_api_key and settings.ai_feature_enabled:
+        model = OpenAIModel(model_name=settings.ai_model_name)
+        self.ai_agent = Agent(
+            model=model,
+            result_type=AIProcessingResult,
+            system_prompt="Your AI task description..."
+        )
+```
+
+3. **Implement Async AI Processing**:
+```python
+async def _ai_process_data(self, input_data: str) -> List[str]:
+    if not self.ai_agent:
+        return [input_data]  # Fallback
+    
+    try:
+        result = await self.ai_agent.run(
+            user_prompt=f"Process: {input_data}",
+            message_history=[]
+        )
+        return result.data.result_data
+    except Exception as e:
+        logger.warning(f"AI processing failed: {e}")
+        return [input_data]  # Graceful fallback
+```
+
+4. **Pipeline Integration**:
+```python
+# Add async AI processor stages to pipeline
 pipeline.add_processor_stage(
-    name="ai_schema_validation",
-    processor=PydanticAIValidator(),
-    input_key="json_data",
-    output_key="json_data"  # Overwrite json_data with validated version
+    name="ai_processing",
+    processor=self.ai_processor,
+    input_key="raw_data",
+    output_key="processed_data"
 )
 ```
-- **Note:** Downstream stages should always use `json_data` as the unified key for input, regardless of AI validation enabled/disabled.
-- Do NOT use `validated_data` key anymore; keep pipeline context simple and consistent.
 
-### **Settings Example**
+### **Configuration Settings (FOLLOW EXISTING PATTERNS)**
 ```python
-ai_pydantic_enabled: bool = True
-ai_pydantic_model: str = "gpt-4"
+# app/config/settings.py - ADD TO EXISTING GROUPS
+class Settings(BaseSettings):
+    # AI Integration Settings (NEW SECTION)
+    openai_api_key: Optional[str] = None
+    ai_keyword_extraction_enabled: bool = True
+    ai_model_name: str = "gpt-3.5-turbo"
+    ai_keyword_extraction_timeout: int = 10
+    ai_max_keywords_per_prompt: int = 5
+    
+    # Feature-specific AI settings
+    ai_content_analysis_enabled: bool = True
+    ai_schema_validation_enabled: bool = True
 ```
 
-### **Compliance**
-- Do NOT mix PydanticAI logic with business logic.
-- Do NOT create config files outside `settings.py`.
-- Always log and handle errors gracefully.
-- Always write tests for new validation logic.
+### **Dependencies (UPDATED)**
+```python
+# requirements.prod.txt - REMOVE openai, USE pydantic-ai
+pydantic-ai  # PREFERRED - includes OpenAI integration
+# openai==1.58.1  # REMOVE - replaced by pydantic-ai
+```
+
+### **Testing PydanticAI (MANDATORY PATTERNS)**
+```python
+import pytest
+from unittest.mock import Mock, AsyncMock, patch
+
+@patch('app.services.processors.my_processor.Agent')
+@patch('app.services.processors.my_processor.OpenAIModel')
+def test_ai_processing_success(self, mock_openai_model, mock_agent):
+    # Mock PydanticAI Agent response
+    mock_result = Mock()
+    mock_result.data = AIProcessingResult(
+        result_data=["processed1", "processed2"],
+        primary_item="processed1",
+        confidence_score=0.95
+    )
+    
+    mock_agent_instance = AsyncMock()
+    mock_agent_instance.run.return_value = mock_result
+    mock_agent.return_value = mock_agent_instance
+    
+    processor = MyProcessor(ai_api_key="test-key")
+    
+    import asyncio
+    result = asyncio.run(processor._ai_process_data("input"))
+    assert result == ["processed1", "processed2"]
+```
+
+### **Architecture Benefits of PydanticAI**
+✅ **Type Safety**: Compile-time validation for AI responses  
+✅ **Structured Output**: No manual string parsing required  
+✅ **Async Native**: Built-in async/await support  
+✅ **Error Handling**: Automatic validation and graceful fallbacks  
+✅ **Model Agnostic**: Easy switching between AI providers  
+✅ **Pydantic Integration**: Seamless with existing validation patterns
 
 ---
 
@@ -585,7 +672,7 @@ If an AI agent encounters any pattern violations:
 
 ---
 
-*Last Updated: July 8, 2025*  
-*Architecture Version: 2.0 - Fully Refactored with Pipeline Pattern*  
-*Test Status: 13/13 Passing - Full Integration Validated*  
-*AI Agent Compliance: Mandatory for all code changes*
+*Last Updated: July 11, 2025*  
+*Architecture Version: 2.1 - PydanticAI Integration Complete*  
+*Test Status: AI Keyword Extraction Fully Tested*  
+*AI Agent Compliance: Mandatory PydanticAI for all AI integrations*
