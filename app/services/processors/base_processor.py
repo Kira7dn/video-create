@@ -21,6 +21,7 @@ class ProcessingStage(Enum):
     SEGMENT_CREATION = "segment_creation"
     CONCATENATION = "concatenation"
     CLEANUP = "cleanup"
+    S3_UPLOAD = "s3_upload"
 
 
 @dataclass

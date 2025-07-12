@@ -1,3 +1,7 @@
+# For S3 unit test mocking
+moto>=4.2.0
+# AWS S3 Upload
+boto3>=1.28.0
 # Development Requirements - Full featured
 fastapi==0.115.13
 uvicorn[standard]==0.34.3

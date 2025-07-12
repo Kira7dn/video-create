@@ -101,10 +101,12 @@ class ProcessorPipelineStage(PipelineStage):
             raise ProcessingError(f"No input data found for key '{self.input_key}'")
         
         # Execute processor (handle both sync and async)
+        kwargs: Dict[str, Any] = {"context": context}
+        
         if asyncio.iscoroutinefunction(self.processor.process):
-            result = await self.processor.process(input_data, context=context)
+            result = await self.processor.process(input_data, **kwargs)
         else:
-            result = self.processor.process(input_data, context=context)
+            result = self.processor.process(input_data, **kwargs)
         
         # If processor is a Validator, handle validation result
         from app.services.processors.base_processor import Validator

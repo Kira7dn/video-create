@@ -134,12 +134,16 @@ Guidelines:
         metric = self._start_processing(ProcessingStage.DOWNLOAD)
         try:
             download_results = input_data
-            context = kwargs.get('context')
+            context = kwargs["context"]  # Pipeline always provides context
             if not context:
                 raise ProcessingError("Context is required for ImageAutoProcessor")
             if not download_results or len(download_results) != 2:
                 raise ProcessingError("Invalid download results format")
             segment_results, background_music_result = download_results
+            # Check segment count matches asset count
+            context_segments = context.get('segments') if isinstance(context, dict) else getattr(context, 'segments', None)
+            if context_segments is not None and len(segment_results) != len(context_segments):
+                raise ProcessingError(f"Segment count mismatch: {len(segment_results)} results vs {len(context_segments)} context segments")
             min_width = settings.video_min_image_width
             min_height = settings.video_min_image_height
             temp_dir = context.get('temp_dir') if isinstance(context, dict) else context.temp_dir

@@ -1,3 +1,5 @@
+# AWS S3 Upload
+boto3>=1.28.0
 # Production Requirements - Optimized for deployment
 # Core FastAPI
 fastapi==0.115.13

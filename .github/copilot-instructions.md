@@ -1,3 +1,6 @@
+## OTHER_RULES
+
+When calling check_ai_script_hallucinations with a path starting with "C:\Workspace\", convert the path to the "/workspace/" format instead. Example: "C:\Workspace\video-create\app\main.py" becomes "/workspace/video-create/app/main.py".
 # Video Creation Service - Architecture & Development Guidelines
 
 ## 🤖 **AI AGENT DEVELOPMENT RULES - MANDATORY COMPLIANCE**
@@ -69,7 +72,6 @@ app/services/
     ├── concatenation_processor.py # Video concatenation (FFMPEG)
     ├── batch_processor.py       # Batch operations (CONCURRENCY)
     ├── image_auto_processor.py  # AI-powered image validation & replacement (PYDANTIC-AI)
-    ├── ai_image_searcher.py     # AI-enhanced image search functionality
     ├── pydantic_ai_validator.py # PydanticAI validation components
     └── pipeline.py              # Pipeline pattern (ASYNC STAGES)
 ```

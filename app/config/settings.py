@@ -58,6 +58,19 @@ class Settings(BaseSettings):
     video_default_codec: str = "libx264"
     video_default_audio_codec: str = "aac"
     video_default_resolution: str = "1920,1080"
+    # AWS S3 Settings
+    aws_s3_bucket: str = ""
+    aws_s3_region: str = "us-east-1"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_s3_prefix: str = "videos/"  # S3 object key prefix for uploads
+    """
+    AWS S3 configuration for video upload.
+    aws_s3_bucket: S3 bucket name
+    aws_s3_region: S3 region
+    aws_s3_key: AWS access key
+    aws_s3_secret: AWS secret key
+    """
     video_default_segment_duration: float = 5.0
     video_default_start_delay: float = 0.5
     video_default_end_delay: float = 0.5

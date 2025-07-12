@@ -57,7 +57,7 @@ class VideoCreationServiceV2:
         except Exception as e:
             logger.warning(f"Failed to cleanup old temp directories on startup: {e}")
 
-    async def create_video_from_json(self, json_data: Dict) -> str:
+    async def create_video_from_json(self, json_data: Dict) -> Dict:
         """
         Create a video from JSON data with improved resource management and pipeline processing
         """
@@ -109,7 +109,7 @@ class VideoCreationServiceV2:
 
     async def _process_video_creation_pipeline(
         self, json_data: Dict, temp_dir: str, video_id: str
-    ) -> str:
+    ) -> Dict:
         """Process video creation using pipeline pattern"""
         # Create pipeline context
         context_data = {
@@ -129,12 +129,14 @@ class VideoCreationServiceV2:
         pipeline = self._build_video_pipeline()
         result_context = await pipeline.execute(context)
 
-        # Return final video path
+        # Return final video path & S3 URL
         final_video_path = result_context.get("final_video_path")
+        s3_url = result_context.get("s3_upload_result")
         if not final_video_path or not os.path.exists(final_video_path):
             raise VideoCreationError("Final video was not created successfully")
-
-        return final_video_path
+        if not s3_url:
+            raise VideoCreationError("S3 upload failed or S3 URL not found")
+        return {"video_path": final_video_path, "s3_url": s3_url}
 
     def _build_video_pipeline(self) -> VideoPipeline:
         """Build the video processing pipeline"""
@@ -180,6 +182,15 @@ class VideoCreationServiceV2:
             func=self._concatenate_video_stage,
             output_key="final_video_path",
             required_inputs=["clip_paths", "transitions", "background_music"]
+        )
+
+        # Stage 4: Upload final video to S3
+        from app.services.processors.s3_upload_processor import S3UploadProcessor
+        pipeline.add_processor_stage(
+            name="s3_upload",
+            processor=S3UploadProcessor(metrics_collector=self.metrics_collector),
+            input_key="final_video_path",
+            output_key="s3_upload_result"
         )
 
         return pipeline

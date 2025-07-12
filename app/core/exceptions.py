@@ -34,9 +34,23 @@ class DownloadError(Exception):
     pass
 
 
+
 class ProcessingError(Exception):
     """Exception raised when video processing fails"""
     pass
+
+
+class UploadError(ProcessingError):
+    """Exception raised when S3 upload fails
+    Args:
+        message (str): Error message
+        video_id (Optional[str]): Video identifier (if available)
+    Example:
+        raise UploadError("Failed to upload", video_id="abc123")
+    """
+    def __init__(self, message: str, video_id: Optional[str] = None):
+        super().__init__(message)
+        self.video_id = video_id
 
 
 class FileValidationError(Exception):
