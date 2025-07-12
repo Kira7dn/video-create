@@ -10,9 +10,6 @@ import shutil
 import threading
 from contextlib import contextmanager, asynccontextmanager
 from typing import List, Optional, Union, AsyncIterator
-from pathlib import Path
-
-from moviepy import VideoFileClip, AudioFileClip, ImageClip
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -23,27 +20,6 @@ class ResourceManager:
 
     def __init__(self):
         self.tracked_files: List[str] = []
-        self.tracked_clips: List[Union[VideoFileClip, AudioFileClip, ImageClip]] = []
-
-    def track_file(self, file_path: str) -> str:
-        """Track a file for automatic cleanup"""
-        self.tracked_files.append(file_path)
-        return file_path
-
-    def track_clip(self, clip: Union[VideoFileClip, AudioFileClip, ImageClip]):
-        """Track a clip for automatic cleanup"""
-        self.tracked_clips.append(clip)
-        return clip
-
-    def cleanup_clips(self):
-        """Clean up all tracked clips"""
-        for clip in self.tracked_clips:
-            try:
-                clip.close()
-                logger.debug(f"✅ Closed clip: {type(clip).__name__}")
-            except Exception as e:
-                logger.warning(f"Failed to close clip {type(clip).__name__}: {e}")
-        self.tracked_clips.clear()
 
     def cleanup_files(self):
         """Clean up all tracked files"""
@@ -60,7 +36,6 @@ class ResourceManager:
 
     def cleanup_all(self):
         """Clean up all tracked resources"""
-        self.cleanup_clips()
         self.cleanup_files()
 
         if settings.performance_gc_enabled:
@@ -177,13 +152,3 @@ def cleanup_old_temp_directories(
     except Exception as e:
         logger.warning(f"Failed to cleanup old temp directories: {e}")
 
-
-def close_moviepy_clips_globally():
-    """Close all MoviePy clips in global namespace"""
-    try:
-        from moviepy.tools import close_all_clips
-
-        close_all_clips(objects="globals", types=("audio", "video", "image"))
-        logger.info("✅ Closed all clips using MoviePy's close_all_clips")
-    except Exception as e:
-        logger.warning(f"Failed to close clips globally: {e}")

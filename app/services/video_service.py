@@ -6,7 +6,7 @@ import os
 import uuid
 import logging
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 from pathlib import Path
 
 from app.core.exceptions import VideoCreationError, DownloadError, ProcessingError
@@ -25,7 +25,7 @@ from app.services.processors.validation_processor import create_video_request_va
 from app.services.processors.concatenation_processor import ConcatenationProcessor
 from app.services.processors.batch_processor import SegmentBatchProcessor
 from app.services.processors.pipeline import (
-    VideoPipeline, PipelineContext, FunctionPipelineStage
+    VideoPipeline, PipelineContext
 )
 from app.services.processors.pydantic_ai_validator import PydanticAIValidator
 from app.services.processors.image_auto_processor import ImageAutoProcessor
@@ -33,7 +33,7 @@ from app.services.processors.image_auto_processor import ImageAutoProcessor
 logger = logging.getLogger(__name__)
 
 
-class VideoCreationServiceV2:
+class VideoCreationService:
     """
     Refactored video creation service with improved separation of concerns
     """
@@ -234,15 +234,16 @@ class VideoCreationServiceV2:
         clip_paths = context.get("clip_paths")
         transitions = context.get("transitions")
         download_results = context.get("download_results")
-        
+
         if not download_results or len(download_results) != 2:
             raise ProcessingError("Background music download result not found")
-        
+
         _, background_music_result = download_results
 
-        # Generate output path
-        output_path = self._get_output_path(context.video_id)
-        
+        # Generate output path inside temp_dir
+        filename = f"final_video_{context.video_id}.mp4"
+        output_path = os.path.join(context.temp_dir, filename)
+
         # Concatenate clips
         final_clip_path = self.concatenation_processor.concatenate_clips(
             video_segments=clip_paths,
@@ -251,7 +252,7 @@ class VideoCreationServiceV2:
             background_music=background_music_result,
             transitions=transitions
         )
-        
+
         logger.info(f"✅ Created video: {final_clip_path}")
         return final_clip_path
 
@@ -262,4 +263,4 @@ class VideoCreationServiceV2:
 
 
 # Create service instance
-video_service_v2 = VideoCreationServiceV2()
+video_service = VideoCreationService()

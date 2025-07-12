@@ -8,7 +8,6 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional, TypeVar, Coroutine
 from dataclasses import dataclass
-import weakref
 
 logger = logging.getLogger(__name__)
 

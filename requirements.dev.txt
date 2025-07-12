@@ -8,11 +8,8 @@ uvicorn[standard]==0.34.3
 pydantic==2.11.7
 python-multipart==0.0.20
 requests==2.32.4
-moviepy==2.2.1
-python-dotenv==1.1.0
 opencv-python==4.11.0.86  # Heavy lib for dev/testing
 numpy==2.3.0
-soundfile>=0.12.1
 psutil==5.9.8
 pydantic-settings==2.10.1
 starlette==0.46.2
@@ -21,7 +18,6 @@ imageio-ffmpeg==0.6.0
 pillow==11.2.1
 aiohttp==3.9.5
 aiofiles==23.2.0
-gtts==2.5.1
 filelock==3.13.1
 pydantic-ai
 

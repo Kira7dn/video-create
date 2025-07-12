@@ -5,7 +5,6 @@ Custom exception handlers and error types
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import traceback
 from typing import Optional

@@ -49,14 +49,14 @@ When calling check_ai_script_hallucinations with a path starting with "C:\Worksp
    - **MUST** implement proper cleanup for ALL resources
    - **MUST** monitor memory usage and implement garbage collection
    - **ALWAYS** use `managed_resources()` and `managed_temp_directory()`
-   - **FOLLOW EXISTING PATTERNS**: Check `video_service_v2.py` for resource management examples
+   - **FOLLOW EXISTING PATTERNS**: Check `video_service.py` for resource management examples
 
 ## 🏗️ **EXISTING ARCHITECTURE COMPONENTS - DO NOT MODIFY STRUCTURE**
 
 ### **Core Services Structure - RESPECT EXISTING HIERARCHY**
 ```
 app/services/
-├── video_service_v2.py          # Main orchestrator service (REFACTORED)
+├── video_service.py          # Main orchestrator service (REFACTORED)
 ├── video_processing_service.py  # Processing coordinator (MINIMAL LOGIC)
 ├── download_service.py          # Asset downloading (ASYNC)
 ├── resource_manager.py          # Resource management (CONTEXT MANAGERS)
@@ -259,7 +259,7 @@ async def test_pipeline_execution():
 ```python
 @pytest.mark.asyncio
 async def test_full_video_creation():
-    service = VideoCreationServiceV2()
+    service = VideoCreationService()
     
     # Mock external dependencies - FOLLOW EXISTING PATTERNS
     with patch('app.services.download_service.DownloadService'):
@@ -515,7 +515,7 @@ If an AI agent encounters any pattern violations:
 - **External Dependencies:**
   - **Pixabay API** for image search (see `utils/image_utils.py`, `image_auto_processor.py`).
   - **PydanticAI** for AI-powered keyword extraction and validation (requires API key).
-  - **MoviePy, OpenCV, Pillow** for video/image/audio processing.
+  - ** OpenCV, Pillow** for video/image/audio processing.
   - **FastAPI** for API layer, with custom middleware and exception handling.
 
 - **Cross-Component Communication:**

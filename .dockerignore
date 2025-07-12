@@ -43,9 +43,6 @@ result/
 # Documentation and examples
 *MIGRATION*.md
 *AUDIO_MIGRATION*.md
-moviepy.md
-moviepy_transition_example.py
-moviepy_transitions_enum.json
 input_sample*.json
 *_sample.*
 *_example.*

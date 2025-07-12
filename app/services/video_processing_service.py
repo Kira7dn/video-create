@@ -8,7 +8,6 @@ from typing import List, Dict, Optional, Any
 from app.core.exceptions import VideoCreationError
 from app.services.resource_manager import ResourceManager
 from app.services.processors.audio_processor import AudioProcessor
-from app.services.processors.text_overlay_processor import TextOverlayProcessor
 from app.services.processors.transition_processor import TransitionProcessor
 from app.services.processors.segment_processor import SegmentProcessor
 from app.services.processors.concatenation_processor import ConcatenationProcessor

@@ -82,9 +82,6 @@ result/
 .roo/
 *MIGRATION*.md
 *AUDIO_MIGRATION*.md
-moviepy.md
-moviepy_transition_example.py
-moviepy_transitions_enum.json
 
 # Sample and example files
 input_sample*.json
