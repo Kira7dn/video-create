@@ -124,15 +124,23 @@ class SegmentProcessor:
                 fade_out_type = "fade"
                 video_filters.append(f"fade=t=out:st={fade_out_start}:d={fade_out_duration}")
                 audio_filters.append(f"afade=t=out:st={fade_out_start}:d={fade_out_duration}")
+        
+        # Calculate total duration
         total_duration = original_duration if input_type == "video" else fade_in_duration + original_duration + fade_out_duration
+        
+        # Handle text overlays - build them separately to avoid conflicts
         text_overs = segment.get("text_over")
         if text_overs:
             if not isinstance(text_overs, list):
                 raise VideoCreationError("text_over must be an array of objects")
+            
+            # Add text filters directly to video filters
             for text_over in text_overs:
                 drawtext_filter = TextOverlayProcessor.build_drawtext_filter(text_over, total_duration)
                 if drawtext_filter:
                     video_filters.append(drawtext_filter)
+        
+        # Build FFmpeg command based on input type
         if input_type == "video":
             ffmpeg_cmd = [
                 "ffmpeg", "-y",

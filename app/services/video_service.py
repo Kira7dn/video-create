@@ -29,6 +29,7 @@ from app.services.processors.pipeline import (
 )
 from app.services.processors.pydantic_ai_validator import PydanticAIValidator
 from app.services.processors.image_auto_processor import ImageAutoProcessor
+from app.services.processors.transcript_processor import TranscriptProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -142,16 +143,15 @@ class VideoCreationService:
         """Build the video processing pipeline"""
         pipeline = VideoPipeline(self.metrics_collector)
 
-        # Optional: AI schema validation stage (overwrites json_data if enabled)
-        if settings.ai_pydantic_enabled:
-            pipeline.add_processor_stage(
-                name="ai_schema_validation",
-                processor=PydanticAIValidator(),
-                input_key="json_data",
-                output_key="json_data"  # Overwrite original json_data with validated version
-            )
+        # Stage 1: AI schema validation stage
+        pipeline.add_processor_stage(
+            name="ai_schema_validation",
+            processor=PydanticAIValidator(),
+            input_key="json_data",
+            output_key="json_data"
+        )
 
-        # Stage 1: Download assets
+        # Stage 2: Download assets
         pipeline.add_function_stage(
             name="download_assets",
             func=self._download_assets_stage,
@@ -159,16 +159,24 @@ class VideoCreationService:
             required_inputs=["json_data"]
         )
 
-        # Optional: Image auto validation/search stage
-        if settings.image_auto_enabled:
-            pipeline.add_processor_stage(
-                name="image_auto",
-                processor=ImageAutoProcessor(),
-                input_key="download_results",
-                output_key="processed_segments"
-            )
+        # Stage 3: Image auto processing
+        pipeline.add_processor_stage(
+            name="image_auto",
+            processor=ImageAutoProcessor(),
+            input_key="download_results",
+            output_key="processed_segments"
+        )
 
-        # Stage 2: Create segment clips (dùng processed_segments)
+        # Stage 4: Text overlay alignment
+        pipeline.add_processor_stage(
+            name="text_overlay_alignment",
+            processor=TranscriptProcessor(),
+            input_key="processed_segments",
+            output_key="processed_segments",
+            required_inputs=["processed_segments"]
+        )
+
+        # Stage 5: Create segment clips
         pipeline.add_function_stage(
             name="create_segment_clips",
             func=self._create_segment_clips_stage,
@@ -176,7 +184,7 @@ class VideoCreationService:
             required_inputs=["processed_segments"]
         )
 
-        # Stage 3: Concatenate final video
+        # Stage 6: Concatenate final video
         pipeline.add_function_stage(
             name="concatenate_video",
             func=self._concatenate_video_stage,
@@ -184,7 +192,7 @@ class VideoCreationService:
             required_inputs=["clip_paths", "transitions", "background_music"]
         )
 
-        # Stage 4: Upload final video to S3
+        # Stage 7: Upload final video to S3
         from app.services.processors.s3_upload_processor import S3UploadProcessor
         pipeline.add_processor_stage(
             name="s3_upload",

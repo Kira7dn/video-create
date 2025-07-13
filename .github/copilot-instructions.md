@@ -60,7 +60,6 @@ app/services/
 ├── video_processing_service.py  # Processing coordinator (MINIMAL LOGIC)
 ├── download_service.py          # Asset downloading (ASYNC)
 ├── resource_manager.py          # Resource management (CONTEXT MANAGERS)
-├── audio_effects_service.py     # Audio effects and processing
 ├── performance_utils.py         # Performance monitoring utilities
 └── processors/                  # Specialized processors (NEW ARCHITECTURE)
     ├── base_processor.py        # Abstract base classes (METRICS + SRP)
