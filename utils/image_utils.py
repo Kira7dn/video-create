@@ -274,13 +274,45 @@ def auto_enhance_image(
 def is_image_size_valid(image_path: str, min_width: int, min_height: int) -> bool:
     """
     Kiểm tra kích thước ảnh có đạt chuẩn không.
+    
+    Args:
+        image_path: Đường dẫn đến file ảnh
+        min_width: Chiều rộng tối thiểu (pixels)
+        min_height: Chiều cao tối thiểu (pixels)
+        
+    Returns:
+        bool: True nếu ảnh đạt chuẩn kích thước, False nếu không
+        
+    Examples:
+        >>> is_image_size_valid("image.jpg", 1280, 720)
+        True
+        >>> is_image_size_valid("small_image.jpg", 1920, 1080)
+        False
     """
+    # Validate input parameters
+    if not image_path or not os.path.exists(image_path):
+        return False
+        
+    if min_width <= 0 or min_height <= 0:
+        return False
+    
     try:
         with Image.open(image_path) as img:
             width, height = img.size
-            return width >= min_width and height >= min_height
+            is_valid = width >= min_width and height >= min_height
+            
+            # Optional: Add debug logging (can be enabled if needed)
+            # print(f"Image {image_path}: {width}x{height} (min: {min_width}x{min_height}) -> {'Valid' if is_valid else 'Invalid'}")
+            
+            return is_valid
+            
+    except (IOError, OSError, ValueError) as e:
+        # Specific image-related errors
+        # print(f"Error reading image {image_path}: {e}")
+        return False
     except Exception as e:
-        # Có thể log nếu cần
+        # Catch-all for unexpected errors
+        # print(f"Unexpected error checking image {image_path}: {e}")
         return False
 
 
@@ -294,39 +326,58 @@ def search_pixabay_image(
     Strategy:
     1. Ưu tiên largeImageURL (thường có kích thước lớn hơn)
     2. Fallback về webformatURL nếu không có large
-    3. Filter dựa trên webformat size (là size tối thiểu có sẵn)
+    3. Filter dựa trên actual size requirements
     """
     url = "https://pixabay.com/api/"
+    
+    # Set reasonable API filter since we prioritize large/fullHD images
+    # These are typically much larger than min requirements
+    api_min_width = max(800, min_width)  # Don't go below 800px
+    api_min_height = max(600, min_height)  # Don't go below 600px
+    
     params = {
         "key": api_key,
         "q": prompt,
+        "lang": "en",
         "image_type": "photo",
+        "orientation": "horizontal",
+        "order": "popular",
+        "editors_choice": "true",
+        # Removed hardcoded category to allow more diverse results
         "safesearch": "true",
-        "min_width": max(640, min_width // 2),  # Giảm yêu cầu Pixabay filter
-        "min_height": max(480, min_height // 2),  # Để tăng khả năng tìm thấy
-        "per_page": 10,
+        "min_width": api_min_width,
+        "min_height": api_min_height,
+        "per_page": 20,  # Increased for better chances
     }
+    
     try:
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         hits = data.get("hits", [])
         
+        # Priority 1: Tìm largeImageURL từ tất cả hits
         for hit in hits:
-            # Ưu tiên largeImageURL (thường đủ lớn cho yêu cầu)
             large_url = hit.get("largeImageURL")
-            web_url = hit.get("webformatURL")
-            
             if large_url:
+                # Assume large images are usually big enough (typically 1920x1080+)
                 return large_url
-            elif web_url:
-                # Fallback to webformat nếu không có large
-                web_width = hit.get("webformatWidth", 0)
-                web_height = hit.get("webformatHeight", 0)
-                if web_width >= min_width // 2 and web_height >= min_height // 2:
-                    return web_url
         
-        # Nếu không tìm được gì với filter, thử lại mà không filter size
+        # Priority 2: Tìm fullHDURL từ tất cả hits
+        for hit in hits:
+            fullhd_url = hit.get("fullHDURL")
+            if fullhd_url:
+                # FullHD usually 1920x1080, good for most cases
+                return fullhd_url
+        
+        # Priority 3: Tìm imageURL (preview) từ tất cả hits
+        for hit in hits:
+            image_url = hit.get("imageURL")
+            if image_url:
+                # Last resort, might be smaller but better than nothing
+                return image_url
+        
+        # Fallback: remove size constraints entirely and retry
         if not hits:
             params.pop("min_width", None)
             params.pop("min_height", None)
@@ -337,8 +388,11 @@ def search_pixabay_image(
             
             if hits:
                 first_hit = hits[0]
-                return first_hit.get("largeImageURL") or first_hit.get("webformatURL")
+                return (first_hit.get("largeImageURL") or 
+                       first_hit.get("fullHDURL") or 
+                       first_hit.get("imageURL"))
                 
-    except Exception:
+    except Exception as e:
+        # Could add logging here if needed
         pass
     return None

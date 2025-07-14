@@ -136,14 +136,12 @@ class Settings(BaseSettings):
     # AI Keyword Extraction Settings
     ai_keyword_extraction_enabled: bool = True
     ai_keyword_extraction_timeout: int = 10
-    ai_max_keywords_per_prompt: int = 5
+    ai_max_keywords_per_prompt: int = 3
 
     # Image Auto Processor Settings
     image_auto_enabled: bool = True
-
-    # Image Validation Settings
-    video_min_image_width: int = 1280  # Minimum image width for video segments
-    video_min_image_height: int = 720  # Minimum image height for video segments
+    video_min_image_width: int = 1024  # Minimum image width for video segments
+    video_min_image_height: int = 576  # Minimum image height for video segments
     pixabay_api_key: str = ""  # API key for Pixabay image search
 
     model_config = {

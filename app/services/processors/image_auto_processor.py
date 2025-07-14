@@ -13,7 +13,7 @@ import os
 import requests
 import shutil
 from uuid import uuid4
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 
@@ -22,9 +22,25 @@ logger = logging.getLogger(__name__)
 
 class KeywordExtractionResult(BaseModel):
     """Structured result for AI keyword extraction"""
-    keywords: List[str]
-    primary_keyword: str
-    search_strategy: str = "progressive"  # progressive, fallback, or specific
+    keywords: List[str] = []
+    primary_keyword: str = ""
+    search_strategy: str = "progressive"
+    
+    @field_validator('keywords')
+    @classmethod
+    def validate_keywords(cls, v):
+        """Ensure keywords is not empty"""
+        if not v:
+            return ["abstract concept", "digital illustration"]
+        return v
+    
+    @field_validator('primary_keyword')
+    @classmethod 
+    def validate_primary_keyword(cls, v, info):
+        """Ensure primary_keyword is set"""
+        if not v and info.data.get('keywords'):
+            return info.data['keywords'][0]
+        return v or "abstract concept"
 
 class ImageAutoProcessor(BaseProcessor):
     """
@@ -49,18 +65,26 @@ class ImageAutoProcessor(BaseProcessor):
                 self.keyword_agent = Agent(
                     model=model,
                     result_type=KeywordExtractionResult,
-                    system_prompt="""You are an expert image search specialist. 
-Extract 3-5 best English keywords to find suitable stock photos for the given content.
-Focus on visual, concrete terms rather than abstract concepts.
-Return keywords optimized for Pixabay search.
+                    system_prompt="""You are a smart keyword-extraction assistant for image search.
 
-Guidelines:
-- Use short, specific keywords (1-2 words each)
-- Prioritize visual elements over concepts
-- Include relevant objects, settings, emotions, styles
-- Make primary_keyword the most important/specific term
-- Examples: "business meeting" → keywords: ["business", "meeting", "office", "professional", "teamwork"], primary: "business"
-"""
+                        Your task: Extract 4-8 multi-word search phrases that are optimized for Pixabay image search.
+
+                        Requirements:
+                        • Generate compound keywords (2-4 words each)
+                        • Focus on visual, descriptive terms
+                        • Avoid generic single words
+                        • Prioritize searchable, relevant phrases
+                        • Use clear, descriptive language
+
+                        Return structured data with:
+                        - keywords: List of 4-8 multi-word search phrases
+                        - primary_keyword: Most important keyword
+                        - search_strategy: "progressive"
+
+                        Example:
+                        Input: "AI Agents will revolutionize technology by 2025"
+                        Output: keywords=["futuristic AI assistant", "autonomous technology concept", "digital agent illustration", "AI revolution 2025"]
+                        """
                 )
                 logger.info("🤖 PydanticAI Agent initialized successfully")
             except Exception as e:
@@ -69,20 +93,25 @@ Guidelines:
         else:
             self.keyword_agent = None
 
-    async def _ai_extract_keywords(self, segment_text: str) -> List[str]:
+    async def _ai_extract_keywords(self, content: str, fields: Optional[List[str]] = None) -> List[str]:
         """
-        Dùng PydanticAI để trích xuất từ khóa tìm kiếm thông minh từ segment text.
+        Dùng PydanticAI để trích xuất từ khóa tìm kiếm thông minh từ content và fields.
         Trả về list keywords theo độ ưu tiên cao → thấp.
         """
         # Kiểm tra setting có enable AI keyword extraction không
         if not settings.ai_keyword_extraction_enabled or not self.keyword_agent:
             # Fallback: trích xuất từ khóa đơn giản
-            return [segment_text.strip() or "nature"]
+            return [content.strip()]
+        
+        # Chuẩn bị prompt cho PydanticAI Agent
+        fields = fields or []
+        fields_str = ", ".join(fields)
+        user_prompt = f"Extract image search keywords from this content: '{content}' with these related fields: [{fields_str}]"
         
         try:
             # Sử dụng PydanticAI Agent để extract keywords với structured output
             result = await self.keyword_agent.run(
-                user_prompt=f"Extract image search keywords for: {segment_text}",
+                user_prompt=user_prompt,
                 message_history=[]
             )
             
@@ -92,16 +121,16 @@ Guidelines:
             # Giới hạn số keywords theo setting
             final_keywords = keyword_result.keywords[:settings.ai_max_keywords_per_prompt]
             
-            logger.info(f"🤖 PydanticAI extracted keywords: {final_keywords} (primary: {keyword_result.primary_keyword}) from: '{segment_text}'")
+            logger.info(f"🤖 PydanticAI extracted keywords: {final_keywords} (primary: {keyword_result.primary_keyword}) from content: '{content}' with fields: {fields}")
             
             return final_keywords
             
         except Exception as e:
             logger.warning(f"PydanticAI keyword extraction failed: {e}")
             # Fallback về trích xuất đơn giản
-            return [segment_text.strip() or "nature"]
+            return [content.strip() or "nature"]
 
-    async def _ai_search_image(self, prompt: str, min_width: Optional[int] = None, min_height: Optional[int] = None) -> Optional[str]:
+    async def _ai_search_image(self, content: str, fields: Optional[List[str]] = None, min_width: Optional[int] = None, min_height: Optional[int] = None) -> Optional[str]:
         """
         AI-enhanced image search: dùng PydanticAI trích xuất keywords, thử nhiều keywords với Pixabay.
         """
@@ -110,19 +139,19 @@ Guidelines:
         min_height = min_height or settings.video_min_image_height
         
         # AI trích xuất keywords thông minh với PydanticAI
-        keywords_list = await self._ai_extract_keywords(prompt)
+        keywords_list = await self._ai_extract_keywords(content, fields)
         
         # Thử từng keyword cho đến khi tìm được ảnh phù hợp
         for keywords in keywords_list:
             url = search_pixabay_image(keywords, pixabay_key, min_width, min_height)
             if url:
-                logger.info(f"✅ Found image with keywords: '{keywords}' for prompt: '{prompt}'")
+                logger.info(f"✅ Found image with keywords: '{keywords}' for content: '{content}'")
                 return url
         
         # Nếu không tìm được gì, thử keyword fallback cuối cùng
         fallback_url = search_pixabay_image("abstract background", pixabay_key, min_width, min_height)
         if fallback_url:
-            logger.warning(f"⚠️ Using fallback image for prompt: '{prompt}'")
+            logger.warning(f"⚠️ Using fallback image for content: '{content}'")
         
         return fallback_url
 
@@ -134,14 +163,15 @@ Guidelines:
         metric = self._start_processing(ProcessingStage.DOWNLOAD)
         try:
             download_results = input_data
-            context = kwargs["context"]  # Pipeline always provides context
+            context = kwargs.get("context")  # Pipeline always provides context
             if not context:
                 raise ProcessingError("Context is required for ImageAutoProcessor")
             if not download_results or len(download_results) != 2:
                 raise ProcessingError("Invalid download results format")
             segment_results, background_music_result = download_results
             # Check segment count matches asset count
-            context_segments = context.get('segments') if isinstance(context, dict) else getattr(context, 'segments', None)
+            context_segments = context.get('segments')
+            keywords = context.get('keywords')
             if context_segments is not None and len(segment_results) != len(context_segments):
                 raise ProcessingError(f"Segment count mismatch: {len(segment_results)} results vs {len(context_segments)} context segments")
             min_width = settings.video_min_image_width
@@ -151,18 +181,29 @@ Guidelines:
                 raise ProcessingError("temp_dir is required in context")
             new_segment_results = []
             for segment in segment_results:
-                image_obj = segment.get("image", {})
-                image_path = image_obj.get("local_path")
-                prompt = segment.get("voice_over", {}).get("content", "") or ""
+                # Kiểm tra video trước, nếu có video thì valid = True luôn
+                video_obj = segment.get("video")
+                if video_obj:
+                    valid = True
+                else:
+                    # Nếu không có video, kiểm tra image
+                    image_obj = segment.get("image", {})
+                    image_path = image_obj.get("local_path")
+                    valid = False
+                    if image_path:
+                        valid = is_image_size_valid(image_path, min_width, min_height)
+                
+                # Tách content và fields để truyền riêng biệt
+                content = segment.get("voice_over", {}).get("content", "")
+                fields = keywords  # keywords từ context
+                
                 merged_asset = segment.copy()
-                valid = False
-                if image_path:
-                    valid = is_image_size_valid(image_path, min_width, min_height)
-                if not valid:
-                    # Tìm ảnh mới từ self._ai_search_image
-                    new_url = await self._ai_search_image(prompt, min_width, min_height)
+                # Chỉ thay thế ảnh nếu không phải video và ảnh không hợp lệ
+                if not valid and not video_obj:
+                    # Tìm ảnh mới từ self._ai_search_image với content và fields riêng biệt
+                    new_url = await self._ai_search_image(content, fields, min_width, min_height)
                     if not new_url:
-                        raise ProcessingError(f"Không tìm được ảnh phù hợp cho segment: {prompt}")
+                        raise ProcessingError(f"Không tìm được ảnh phù hợp cho content: '{content}' với fields: {fields}")
                     # Download ảnh mới về temp_dir
                     ext = os.path.splitext(new_url)[1] or ".jpg"
                     new_filename = f"auto_image_{uuid4().hex}{ext}"

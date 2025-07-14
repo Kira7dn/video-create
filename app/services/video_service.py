@@ -117,7 +117,8 @@ class VideoCreationService:
             "json_data": json_data,
             "segments": json_data.get("segments", []),
             "transitions": json_data.get("transitions", []),
-            "background_music": json_data.get("background_music")
+            "background_music": json_data.get("background_music"),
+            "keywords": json_data.get("keywords", [])  # Add keywords to context
         }
         context = PipelineContext(
             data=context_data,
