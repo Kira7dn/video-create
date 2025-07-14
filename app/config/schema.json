@@ -41,6 +41,15 @@
             },
             "required": ["url"]
           },
+          "video": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "start_delay": { "type": "number" },
+              "end_delay": { "type": "number" }
+            },
+            "required": ["url"]
+          },
           "transition_in": {
             "type": "object",
             "properties": {
@@ -72,7 +81,7 @@
             }
           }
         },
-        "required": ["id", "voice_over"]
+        "required": ["id"]
       }
     },
     "background_music": {

@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # Text Overlay Settings
     text_default_font_size: int = 48
     text_default_font_color: str = "white"
-    text_default_font_file: str = "fonts/Roboto-Black.ttf"
+    text_default_font_file: str = "fonts\\Roboto-Black.ttf"
     text_default_fade_in: float = 0.5
     text_default_fade_out: float = 0.5
     text_default_position_x: str = "(w-text_w)/2"
@@ -119,6 +119,7 @@ class Settings(BaseSettings):
 
     # Security Settings
     request_timeout: int = 300  # 5 minutes
+    gentle_timeout: int = 120  # 2 minutes for Gentle server (audio processing takes time)
     max_concurrent_requests: int = 10
 
     # Ngrok Settings

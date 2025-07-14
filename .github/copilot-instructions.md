@@ -30,21 +30,29 @@ When calling check_ai_script_hallucinations with a path starting with "C:\Worksp
    - **ALWAYS** use `VideoPipeline` class for orchestrating complex workflows
    - **USE EXISTING COMPONENTS**: `PipelineContext`, `ProcessingStage`, `MetricsCollector`
 
-3. **Configuration Management - ZERO TOLERANCE FOR VIOLATIONS**
+3. **LLM Integration Standards - NEW MANDATORY PATTERNS**
+   - **ALWAYS** use PydanticAI with structured output (Pydantic models)
+   - **MUST** implement fallback mechanisms for LLM failures
+   - **USE** `output_type` instead of deprecated `result_type` in Agent
+   - **FOLLOW EXISTING PATTERNS**: `TranscriptProcessor` LLM integration
+   - **MANDATORY**: Use `@field_validator` (Pydantic V2) not `@validator`
+   - **ALWAYS** provide comprehensive unit tests for LLM features
+
+4. **Configuration Management - ZERO TOLERANCE FOR VIOLATIONS**
    - **ALWAYS** use unified `app.config.settings` - **NEVER** create separate config files
    - **ALL** settings **MUST** support `.env` file overrides
    - **MUST** use Pydantic Settings for type safety and validation
    - Add new settings **ONLY** to `Settings` class in `app/config/settings.py`
-   - **EXISTING SETTINGS STRUCTURE**: Follow grouping patterns (video_, audio_, text_, performance_)
+   - **EXISTING SETTINGS STRUCTURE**: Follow grouping patterns (video_, audio_, text_, performance_, ai_)
 
-4. **Error Handling - MANDATORY PATTERNS**
+5. **Error Handling - MANDATORY PATTERNS**
    - **MUST** use specific exception types: `DownloadError`, `ProcessingError`, `VideoCreationError`
    - **ALWAYS** log errors with context and stack traces
    - **MUST** provide meaningful error messages for debugging
    - **ALWAYS** use try-catch blocks with proper exception chaining
    - **USE EXISTING PATTERNS**: Follow error handling in existing processors
 
-5. **Resource Management - CRITICAL COMPLIANCE**
+6. **Resource Management - CRITICAL COMPLIANCE**
    - **MUST** use async context managers for temporary directories
    - **MUST** implement proper cleanup for ALL resources
    - **MUST** monitor memory usage and implement garbage collection
@@ -71,6 +79,7 @@ app/services/
     ├── concatenation_processor.py # Video concatenation (FFMPEG)
     ├── batch_processor.py       # Batch operations (CONCURRENCY)
     ├── image_auto_processor.py  # AI-powered image validation & replacement (PYDANTIC-AI)
+    ├── transcript_processor.py  # LLM-enhanced transcript alignment (NEW)
     ├── pydantic_ai_validator.py # PydanticAI validation components
     └── pipeline.py              # Pipeline pattern (ASYNC STAGES)
 ```
@@ -323,6 +332,8 @@ demo_ai_keywords.py             # PydanticAI keyword extraction demo
 utils/image_utils.py            # Image processing utilities (smart padding)
 pytest.ini                      # Test configuration (pythonpath, maxfail)
 requirements.prod.txt           # Production dependencies (includes pydantic-ai)
+app/services/processors/transcript_processor.py  # LLM-enhanced transcript processing (NEW)
+test/unit/test_transcript_processor.py          # Comprehensive transcript tests (18 tests)
 ```
 
 ## 🚀 **PERFORMANCE GUIDELINES - RESPECT EXISTING LIMITS**
@@ -436,73 +447,10 @@ requirements.prod.txt           # Production dependencies (includes pydantic-ai)
 
 ---
 
-**Feedback Request:**
-If any section is unclear, incomplete, or missing important patterns, please provide feedback or examples. This will help further refine the copilot instructions for maximum productivity and compliance.
-
-## 🔒 **VALIDATION ENFORCEMENT RULES - ZERO TOLERANCE**
-
-### **File Structure Violations**
-- ❌ Creating files outside `app/services/processors/` for processing logic
-- ❌ Adding configuration files outside `app/config/settings.py`
-- ❌ Bypassing the existing directory structure
-- ❌ Creating monolithic service files instead of using processors
-
-### **Code Quality Violations**
-- ❌ Missing type hints on any function parameter or return value
-- ❌ Missing docstrings on public methods or classes
-- ❌ Using generic `Exception` instead of specific exception types
-- ❌ Hardcoded paths, URLs, or configuration values
-- ❌ Blocking operations in async functions
-- ❌ Missing resource cleanup (no context managers)
-
-### **Architecture Pattern Violations**
-- ❌ Processing logic not inheriting from `BaseProcessor`
-- ❌ Complex workflows not using `VideoPipeline`
-- ❌ Missing metrics collection with `MetricsCollector`
-- ❌ Configuration not using `app.config.settings`
-- ❌ Missing proper error handling with exception chaining
-
-### **Testing Violations**
-- ❌ New code without corresponding unit tests
-- ❌ Tests without proper mocking of dependencies
-- ❌ Missing async test patterns for async code
-- ❌ Tests that don't follow existing patterns
-- ❌ Integration tests without proper environment setup
-
-### **Performance Violations**
-- ❌ Operations exceeding configured concurrency limits
-- ❌ Memory leaks or missing garbage collection
-- ❌ Missing timeout handling for external operations
-- ❌ Inefficient resource usage patterns
-- ❌ Missing performance monitoring and logging
-
-## 🎯 **ENFORCEMENT PRIORITY ORDER**
-
-1. **CRITICAL** - Configuration and file structure compliance
-2. **HIGH** - Architecture pattern adherence (SRP, Pipeline, etc.)
-3. **HIGH** - Error handling and resource management
-4. **MEDIUM** - Code quality and documentation standards
-5. **MEDIUM** - Testing coverage and patterns
-6. **LOW** - Performance optimizations and monitoring
-
-## 📞 **ESCALATION PROTOCOL**
-
-If an AI agent encounters any pattern violations:
-
-1. **STOP** - Do not proceed with the change
-2. **IDENTIFY** - Clearly specify which rule(s) are being violated
-3. **SUGGEST** - Provide specific examples of correct patterns to follow
-4. **REQUIRE** - Demand compliance before any code changes
-5. **VALIDATE** - Run tests to ensure compliance after changes
-
-**Remember: The architecture is designed for maintainability, scalability, and reliability. Every violation weakens these principles! 🛡️**
-
----
-
-*Last Updated: July 11, 2025*  
-*Architecture Version: 2.1 - PydanticAI Integration Complete*  
-*Test Status: AI Keyword Extraction Fully Tested*  
-*AI Agent Compliance: Mandatory PydanticAI for all AI integrations*
+*Last Updated: July 13, 2025*  
+*Architecture Version: 2.2 - LLM-Enhanced TranscriptProcessor Complete*  
+*Test Status: 18/18 TranscriptProcessor Tests Passing*  
+*AI Features: Full PydanticAI integration with structured output and fallback mechanisms*
 
 ## 🔗 **DATA FLOW & INTEGRATION POINTS**
 
@@ -555,3 +503,353 @@ If an AI agent encounters any pattern violations:
 - **Testing Patterns:**
   - Use parameterized and coroutine tests for processors and integration (see `test/test_refactored_architecture.py`, `test/test_image_auto_processor.py`).
   - Test input/output formats and error handling explicitly.
+
+## 🤖 **LLM DEVELOPMENT PATTERNS - MANDATORY FOR AI FEATURES**
+
+### **PydanticAI Integration - FOLLOW TRANSCRIPT_PROCESSOR PATTERNS**
+
+1. **Structured Output Models - ALWAYS USE PYDANTIC**
+```python
+from pydantic import BaseModel, field_validator
+
+class MyLLMOutput(BaseModel):
+    """Pydantic model for LLM structured output"""
+    results: List[str]
+    
+    @field_validator('results')
+    @classmethod
+    def validate_results(cls, v):
+        """Auto-fix và validate LLM output"""
+        validated = []
+        for item in v:
+            # Apply business logic validation
+            if self._is_valid(item):
+                validated.append(item)
+            else:
+                # Auto-fix invalid items
+                validated.append(self._fix_item(item))
+        return validated
+```
+
+2. **LLM Agent Creation - STANDARD PATTERN**
+```python
+from app.config.settings import settings
+from pydantic_ai.agent import Agent
+
+agent = Agent(
+    model=settings.ai_pydantic_model,
+    output_type=MyLLMOutput,  # Use output_type, NOT result_type
+    system_prompt="""Clear, specific instructions for the AI.
+    
+Rules:
+1. Specific constraint (e.g., max 35 characters)
+2. Business logic requirement 
+3. Return format specification
+4. Error handling guidance"""
+)
+
+# Execute with structured output
+result = agent.run_sync(user_prompt=prompt)
+validated_data = result.data  # Type-safe access to Pydantic model
+```
+
+3. **Fallback Mechanisms - MANDATORY IMPLEMENTATION**
+```python
+def _my_llm_function(self, input_data: str) -> List[str]:
+    try:
+        # Primary LLM processing
+        result = agent.run_sync(user_prompt=prompt)
+        return result.data.results
+        
+    except Exception as e:
+        # ALWAYS implement fallback
+        self.logger.warning(f"LLM failed: {e}, using fallback")
+        return self._fallback_processing(input_data)
+
+def _fallback_processing(self, input_data: str) -> List[str]:
+    """Non-LLM fallback that guarantees results"""
+    # Regex, rule-based, or simple algorithms
+    return self._rule_based_processing(input_data)
+```
+
+4. **Integration with Settings - FOLLOW EXISTING PATTERN**
+```python
+def _should_use_llm(self) -> bool:
+    """Check if LLM should be used based on settings"""
+    try:
+        from app.config.settings import settings
+        return (hasattr(settings, 'ai_keyword_extraction_enabled') and 
+                settings.ai_keyword_extraction_enabled)
+    except:
+        return False
+
+def process(self, input_data: Any) -> Any:
+    if self._should_use_llm():
+        return self._process_with_llm(input_data)
+    else:
+        return self._process_without_llm(input_data)
+```
+
+### **LLM Testing Patterns - COMPREHENSIVE COVERAGE REQUIRED**
+
+1. **Mock PydanticAI Agents - STANDARD APPROACH**
+```python
+@patch('pydantic_ai.agent.Agent')
+@patch('app.config.settings.settings')
+def test_llm_success(self, mock_settings, mock_agent_class):
+    processor = MyProcessor()
+    
+    mock_settings.ai_pydantic_model = 'gpt-3.5-turbo'
+    
+    mock_agent = Mock()
+    mock_agent_class.return_value = mock_agent
+    
+    # Create expected Pydantic model result
+    expected_result = MyLLMOutput(results=["test", "data"])
+    mock_result = Mock()
+    mock_result.data = expected_result
+    mock_agent.run_sync.return_value = mock_result
+    
+    result = processor._my_llm_function("test input")
+    
+    assert result == ["test", "data"]
+    mock_agent.run_sync.assert_called_once()
+```
+
+2. **Test Pydantic Model Validation - MANDATORY**
+```python
+def test_pydantic_model_validation(self):
+    """Test auto-fixing of invalid LLM output"""
+    invalid_data = MyLLMOutput(results=["invalid_item", "valid_item"])
+    
+    # Pydantic validator should auto-fix invalid items
+    assert len(invalid_data.results) >= 1
+    assert all(self._is_valid(item) for item in invalid_data.results)
+```
+
+3. **Test Fallback Mechanisms - CRITICAL**
+```python
+@patch('pydantic_ai.agent.Agent', side_effect=Exception("API Error"))
+def test_llm_fallback_on_error(self, mock_agent):
+    processor = MyProcessor()
+    
+    result = processor._my_llm_function("test input")
+    
+    # Should fallback and still return valid results
+    assert isinstance(result, list)
+    assert len(result) > 0
+```
+
+### **LLM Prompt Engineering - BEST PRACTICES**
+
+1. **Structured Prompts - FOLLOW TRANSCRIPT_PROCESSOR STYLE**
+```python
+prompt = f"""
+Task: [Clear description of what AI should do]
+
+Input Data:
+"{input_data}"
+
+Requirements:
+- Specific constraint 1 (e.g., 3-7 words per segment)
+- Specific constraint 2 (e.g., max 35 characters)
+- Business rule (e.g., keep compound words together)
+- Output format (e.g., JSON with specific structure)
+
+Example of expected output:
+{{"results": ["example1", "example2", "example3"]}}
+
+Focus on [key aspect] rather than [what to avoid]!
+"""
+```
+
+2. **Validation-Friendly Prompts - ENSURE PARSEABLE OUTPUT**
+- Always specify exact JSON structure
+- Provide clear examples
+- Include business constraints in prompt
+- Specify error handling expectations
+
+### **AI Settings Configuration - EXTEND EXISTING PATTERNS**
+
+```python
+# app/config/settings.py - ADD TO EXISTING SETTINGS CLASS
+class Settings(BaseSettings):
+    # ...existing settings...
+    
+    # AI Feature Controls
+    ai_keyword_extraction_enabled: bool = True
+    ai_pydantic_model: str = "openai:gpt-3.5-turbo"
+    ai_max_retries: int = 3
+    ai_timeout_seconds: int = 30
+    
+    # LLM-specific settings
+    ai_transcript_segmentation_enabled: bool = True
+    ai_word_group_mapping_enabled: bool = True
+    ai_max_segments_per_request: int = 50
+```
+
+## 🎬 **TRANSCRIPT PROCESSOR IMPLEMENTATION - LLM-ENHANCED PATTERNS**
+
+### **TranscriptProcessor Architecture - FOLLOW THIS EXACTLY**
+
+The `TranscriptProcessor` demonstrates the gold standard for LLM integration:
+
+#### **1. Dual LLM Functions - REQUIRED PATTERN**
+```python
+class TranscriptProcessor(BaseProcessor):
+    def _split_transcript_by_llm(self, content: str) -> List[str]:
+        """LLM-based transcript segmentation with auto-validation"""
+        agent = Agent(
+            model=settings.ai_pydantic_model,
+            output_type=TranscriptSegments,  # Structured output
+            system_prompt="Natural speech segmentation rules..."
+        )
+        # Implementation with fallback...
+    
+    def _find_word_groups_with_llm(self, word_items: List[Dict], segments: List[str]) -> List[Dict]:
+        """LLM-based intelligent word-to-segment mapping"""
+        agent = Agent(
+            model=settings.ai_pydantic_model,
+            output_type=WordGroupMapping,  # Structured mapping
+            system_prompt="Intelligent alignment rules..."
+        )
+        # Implementation with fallback...
+```
+
+#### **2. Pydantic Models - MANDATORY STRUCTURE**
+```python
+class TranscriptSegments(BaseModel):
+    """Auto-validating transcript segments"""
+    segments: List[str]
+    
+    @field_validator('segments')
+    @classmethod
+    def validate_segments(cls, v):
+        # Auto-fix segments that violate constraints
+        # YouTube-optimized: 2-7 words, max 35 chars
+        # Returns validated segments
+
+class WordGroupMapping(BaseModel):
+    """Precise segment-to-word range mapping"""
+    mappings: List[Dict[str, int]]  # segment_index, start_word, end_word
+```
+
+#### **3. Integration Flow - FOLLOW THIS EXACTLY**
+```python
+def process(self, input_data: List[Dict], **kwargs) -> List[Dict]:
+    for segment in input_data:
+        # 1. Get or create transcript_lines using LLM
+        transcript_lines = self._split_transcript_by_llm(content)
+        
+        # 2. Send ORIGINAL transcript to Gentle (not segmented)
+        gentle_response = requests.post("http://localhost:8765/transcriptions", ...)
+        
+        # 3. Use LLM to map segments to Gentle words
+        text_over = self._find_word_groups(word_items, transcript_lines)
+        
+        # 4. Attach timing-accurate overlays
+        segment["text_over"] = text_over
+```
+
+#### **4. Testing Patterns - COMPREHENSIVE COVERAGE**
+```python
+class TestTranscriptSplitByLLM:
+    def test_pydantic_model_validation(self):
+        # Test auto-fixing invalid segments
+    
+    def test_llm_with_structured_output(self):
+        # Mock PydanticAI Agent with TranscriptSegments
+    
+    def test_constraint_validation(self):
+        # Test 2-7 words, max 35 chars enforcement
+
+class TestFindWordGroupsWithLLM:
+    def test_intelligent_mapping(self):
+        # Test LLM mapping segments to word ranges
+    
+    def test_mismatch_handling(self):
+        # Test AI resolving transcript/audio differences
+```
+
+### **TranscriptProcessor Benefits - SHOWCASE THESE**
+
+1. **Natural Speech Flow**: LLM creates segments that feel natural for reading
+2. **Screen Optimization**: Max 35 chars prevents YouTube overlay overflow  
+3. **Intelligent Alignment**: AI handles mismatches better than string matching
+4. **Type Safety**: Pydantic models ensure data integrity
+5. **Robust Fallbacks**: System never fails due to multiple backup strategies
+6. **Configuration Control**: Can enable/disable AI features via settings
+
+---
+
+## 📋 **SUMMARY FOR AI AGENTS**
+
+- Follow strict separation of concerns and pipeline architecture.
+- Use only the provided configuration, error handling, and resource management patterns.
+- Reference sample input and test files for data formats and edge cases.
+- Always use project-specific exceptions and logging.
+- For AI features, ensure environment variables and settings are configured.
+- **NEW**: Implement LLM features using PydanticAI with structured output and fallback mechanisms.
+- **NEW**: Follow TranscriptProcessor patterns for AI-enhanced transcript processing.
+
+---
+
+*Last Updated: July 13, 2025*  
+*Architecture Version: 2.3 - LLM-Enhanced TranscriptProcessor Complete*  
+*Test Status: 18/18 TranscriptProcessor Tests Passing*  
+*AI Features: Full PydanticAI integration with structured output and fallback mechanisms*
+
+## 🔗 **DATA FLOW & INTEGRATION POINTS**
+
+- **Input Format:**
+  - All video creation requests use a JSON format (see `test/input_sample.json`).
+  - Segments may include images, videos, voice_over, text_over, and transitions.
+  - Text overlays support advanced attributes (font, color, position, box, etc).
+
+- **External Dependencies:**
+  - **Pixabay API** for image search (see `utils/image_utils.py`, `image_auto_processor.py`).
+  - **PydanticAI** for AI-powered keyword extraction and validation (requires API key).
+  - **OpenCV, Pillow** for video/image/audio processing.
+  - **FastAPI** for API layer, with custom middleware and exception handling.
+  - **Gentle Server** for precise audio-transcript alignment with timing data.
+
+- **Cross-Component Communication:**
+  - All processors communicate via `PipelineContext` (see `pipeline.py`).
+  - Resource management is handled via async context managers (`resource_manager.py`).
+  - Metrics and error handling are propagated through `MetricsCollector` and custom exceptions (`core/exceptions.py`).
+
+- **Configuration:**
+  - All settings are managed in `app/config/settings.py` (Pydantic Settings, .env overrides).
+  - Never create new config files; always extend the `Settings` class.
+
+- **Logging:**
+  - Logs are written to both console and `data/app.log` (see `main.py`).
+  - Use structured logging for error context and stack traces.
+
+## 🧩 **PROJECT-SPECIFIC CONVENTIONS & PATTERNS**
+
+- **Single Responsibility Principle (SRP):**
+  - Each processor/class must handle only one concern (see `base_processor.py`).
+  - Split multi-responsibility logic into separate processors.
+
+- **Pipeline Pattern:**
+  - All workflows use the pipeline approach (`pipeline.py`, `VideoPipeline`).
+  - Stages are modular, testable, and can be skipped/parallelized.
+
+- **Error Handling:**
+  - Use only project-specific exceptions: `DownloadError`, `ProcessingError`, `VideoCreationError`, `FileValidationError`.
+  - Always log errors with full context and stack trace.
+
+- **Resource Management:**
+  - Use async context managers for temp directories and resource cleanup (`resource_manager.py`).
+  - Monitor memory usage and clean up resources after processing.
+
+- **AI Integration:**
+  - Use PydanticAI for LLM-enhanced processing (see `transcript_processor.py`).
+  - Configure via `.env` and `settings.py` only.
+  - Always implement fallback mechanisms for LLM failures.
+
+- **Testing Patterns:**
+  - Use parameterized and coroutine tests for processors and integration.
+  - Test input/output formats and error handling explicitly.
+  - Mock PydanticAI Agents with structured output for LLM testing.
