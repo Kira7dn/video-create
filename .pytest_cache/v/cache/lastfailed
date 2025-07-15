@@ -1,0 +1,7 @@
+{
+  "test/unit/test_transcript_processor.py::test_find_word_groups_fallback": true,
+  "test/unit/test_transcript_processor.py::test_process_segment_success": true,
+  "test/unit/test_transcript_processor.py::test_process_segment_no_voice_over": true,
+  "test/unit/test_transcript_processor.py::test_real_processing": true,
+  "test/unit/test_transcript_processor.py::test_real_processing_with_gentle": true
+}

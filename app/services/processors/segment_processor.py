@@ -24,6 +24,7 @@ class SegmentProcessor:
         transition_in = segment.get("transition_in", {})
         transition_out = segment.get("transition_out", {})
         segment_id = segment.get("id", str(uuid.uuid4()))
+        voice_over = segment.get("voice_over", {})
         segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
 
         if video_path and os.path.exists(video_path):
@@ -127,7 +128,8 @@ class SegmentProcessor:
         
         # Calculate total duration
         total_duration = original_duration if input_type == "video" else fade_in_duration + original_duration + fade_out_duration
-        
+        # Calculate delay
+        delay = fade_in_duration + voice_over.get("start_delay", 0)
         # Handle text overlays - build them separately to avoid conflicts
         text_overs = segment.get("text_over")
         if text_overs:
@@ -136,7 +138,7 @@ class SegmentProcessor:
             
             # Add text filters directly to video filters
             for text_over in text_overs:
-                drawtext_filter = TextOverlayProcessor.build_drawtext_filter(text_over, total_duration)
+                drawtext_filter = TextOverlayProcessor.build_drawtext_filter(text_over, total_duration, delay)
                 if drawtext_filter:
                     video_filters.append(drawtext_filter)
         

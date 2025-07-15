@@ -224,7 +224,6 @@ class VideoCreationService:
         
         try:
             with managed_resources() as resource_manager:
-                video_processor = VideoProcessingService(resource_manager)
                 from app.services.processors.segment_processor import SegmentProcessor
                 batch_processor = SegmentBatchProcessor(
                     processor_func=SegmentProcessor.create_segment_clip,

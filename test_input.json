@@ -1,0 +1,81 @@
+{
+  "niche": "AI Agents",
+  "keywords": [
+    "AI Agent",
+    "AI trend 2025",
+    "Automation",
+    "Technology"
+  ],
+  "title": "AI Agent là gì? Giới thiệu công nghệ AI agent và xu hướng 2025",
+  "description": "Video giải thích cơ bản về AI agent, cách thức hoạt động và tầm quan trọng của AI agent trong tương lai, phù hợp cho người xem mới bắt đầu tìm hiểu về AI agent và công nghệ tự động hóa.",
+  "segments": [
+    {
+      "id": "hook",
+      "image": {
+        "url": "https://video-media3162.s3.ap-southeast-1.amazonaws.com/Agentic-AI-Automation.jpg",
+        "start_delay": 0,
+        "end_delay": 0
+      },
+      "voice_over": {
+        "url": "https://video-media3162.s3.ap-southeast-1.amazonaws.com/audio_2025-07-02_47-10-48.mp3",
+        "local_path": "test\\source\\voice\\audio_2025-07-02_47-10-48.mp3",
+        "content": "Have you heard about AI Agents? By 2025, these autonomous digital assistants will revolutionize the world of technology!",
+        "start_delay": 1,
+        "end_delay": 1
+      },
+      "transition_out": {
+        "type": "fade",
+        "duration": 0.5
+      }
+    },
+    {
+      "id": "intro",
+      "video": {
+        "url": "https://cdn.pixabay.com/video/2025/05/13/278750_tiny.mp4",
+        "local_path": "test\\source\\video\\278750_tiny.mp4",
+        "start_delay": 0,
+        "end_delay": 0
+      },
+      "transition_in": {
+        "type": "fade",
+        "duration": 0.5
+      },
+      "transition_out": {
+        "type": "fade",
+        "duration": 0.5
+      }
+    },
+    {
+      "id": "main-0",
+      "image": {
+        "url": "https://video-media3162.s3.ap-southeast-1.amazonaws.com/Agentic-AI-Automation.jpg",
+        "start_delay": 0,
+        "end_delay": 0
+      },
+      "voice_over": {
+        "url": "https://video-media3162.s3.ap-southeast-1.amazonaws.com/audio_2025-07-02_48-10-13.mp3",
+        "local_path": "test\\source\\voice\\audio_2025-07-02_48-10-13.mp3",
+        "content": "AI Agents are computer programs capable of making decisions on their own, learning from their environment, and adapting to achieve set goals. According to Quillbot, AI agents have memory, personality, communication abilities, and can optimize their workflow autonomously. You'll find them everywhere—from customer service chatbots and self-driving cars to robotic vacuums and enterprise optimization tools.",
+        "start_delay": 0.5,
+        "end_delay": 0.5
+      },
+      "transition_in": {
+        "type": "fade",
+        "duration": 0.5
+      },
+      "transition_out": {
+        "type": "fade",
+        "duration": 1.0
+      }
+    }
+  ],
+  "background_music": {
+    "url": "https://cdn.pixabay.com/download/audio/2024/09/16/audio_a10608d6cd.mp3?filename=creative-technology-showreel-241274.mp3",
+    "local_path": "test\\source\\bgm\\creative-technology-showreel-241274.mp3",
+    "volume": 0.2,
+    "start_delay": 0,
+    "end_delay": 0,
+    "fade_in": 2.0,
+    "fade_out": 3.0
+  }
+}

@@ -1,0 +1,13 @@
+[
+  "test/e2e/test_e2e_pytest.py::test_e2e_video_creation_with_auto_server",
+  "test/unit/test_transcript_processor.py::test_calculate_similarity",
+  "test/unit/test_transcript_processor.py::test_find_word_groups_fallback",
+  "test/unit/test_transcript_processor.py::test_mappings_to_text_over",
+  "test/unit/test_transcript_processor.py::test_process_segment_gentle_error",
+  "test/unit/test_transcript_processor.py::test_process_segment_no_voice_over",
+  "test/unit/test_transcript_processor.py::test_process_segment_success",
+  "test/unit/test_transcript_processor.py::test_process_success",
+  "test/unit/test_transcript_processor.py::test_real_processing",
+  "test/unit/test_transcript_processor.py::test_real_processing_with_gentle",
+  "test/unit/test_transcript_processor.py::test_validate_word_groups"
+]

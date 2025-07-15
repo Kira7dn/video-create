@@ -1,12 +1,20 @@
 import requests
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
+import logging
+import time
+from datetime import datetime
+
 from app.services.processors.base_processor import BaseProcessor, ProcessingStage
 from app.core.exceptions import ProcessingError
 from app.config.settings import settings
-import tempfile, json
+import tempfile
+import json
 import re
 import os
 from pydantic import BaseModel, field_validator
+
+# Khởi tạo logger
+logger = logging.getLogger(__name__)
 
 class TranscriptSegments(BaseModel):
     """Pydantic model cho validated transcript segments"""
@@ -61,6 +69,12 @@ class WordGroupMapping(BaseModel):
     mappings: List[Dict[str, int]]  # [{"segment_index": 0, "start_word": 0, "end_word": 2}, ...]
 
 class TranscriptProcessor(BaseProcessor):
+    """Xử lý transcript và tạo text overlay với timing chính xác"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+    
     async def _split_transcript_by_llm(self, content: str) -> List[str]:
         """
         Sử dụng OpenAI qua PydanticAI với structured output để phân đoạn transcript.
@@ -69,27 +83,34 @@ class TranscriptProcessor(BaseProcessor):
         Returns:
             List[str] - danh sách câu đã phân đoạn và validated
         """
+        self.logger.info("Bắt đầu phân đoạn transcript bằng LLM")
+        start_time = time.time()
+        
+        # Tạo prompt cho LLM
+        prompt = f"""
+        Phân đoạn transcript sau thành các câu ngắn tự nhiên (2-7 từ, tối đa 35 ký tự):
+        
+        {content}
+        
+        Yêu cầu:
+        - Mỗi câu phải là một đơn vị ngữ nghĩa hoàn chỉnh
+        - Giữ nguyên dấu câu
+        - Không được cắt ngang từ
+        - Mỗi câu tối đa 35 ký tự
+        - Mỗi câu nên có từ 2-7 từ
+        - Trả về dạng JSON với key 'segments' là list các câu
+        """
+        
         try:
-            from app.config.settings import settings
-            from pydantic_ai.agent import Agent
+            from pydantic_ai import Agent
             
-            # Tạo agent với structured output (Pydantic model)
+            self.logger.debug("Khởi tạo Agent với model: %s", settings.ai_pydantic_model)
             agent = Agent(
                 model=settings.ai_pydantic_model,
-                output_type=TranscriptSegments,  # Type-safe parsing
-                system_prompt="""You are an expert at segmenting transcript text for YouTube video overlays. 
-Your task is to break down transcript into natural, readable segments that feel like natural speech patterns.
-
-Critical Natural Speech Rules:
-1. Each segment should be 3-7 words (natural phrase length)
-2. Maximum 35 characters per segment (comfortable reading)
-3. Break at natural breath pauses and thought boundaries
-4. Keep related words together (don't break "artificial intelligence" or "New York")
-5. Maintain natural rhythm and flow
-6. Each segment should feel like a complete thought chunk
-7. Avoid breaking mid-sentence unless at natural pause
-8. Consider speech cadence - slower for important words
-9. Return segments array in the JSON format: {"segments": ["text1", "text2", ...]}"""
+                output_type=TranscriptSegments,
+                system_prompt="""Bạn là một chuyên gia xử lý ngôn ngữ tự nhiên.
+                Nhiệm vụ của bạn là phân đoạn transcript thành các câu ngắn tự nhiên.
+                Mỗi câu phải là một đơn vị ngữ nghĩa hoàn chỉnh, dễ đọc và tự nhiên khi đọc to."""
             )
             
             prompt = f"""
@@ -288,60 +309,163 @@ Return mappings array where each object maps segment_index to start_word and end
     
     async def _find_word_groups(self, word_items: List[Dict], transcript_lines: List[str]) -> List[Dict]:
         """Tìm groups từ cho từng câu transcript - sử dụng LLM hoặc fallback"""
+        self.logger.info("Bắt đầu tìm word groups cho %d segments", len(transcript_lines))
+        start_time = time.time()
+        
         # Kiểm tra xem có nên dùng LLM không
         try:
             from app.config.settings import settings
             if hasattr(settings, 'ai_keyword_extraction_enabled') and settings.ai_keyword_extraction_enabled:
-                return await self._find_word_groups_with_llm(word_items, transcript_lines)
-        except:
-            pass
-        
-        # Fallback về method cũ
-        return self._find_word_groups_fallback(word_items, transcript_lines)
+                self.logger.debug("Sử dụng LLM để tìm word groups")
+                result = await self._find_word_groups_with_llm(word_items, transcript_lines)
+                duration = time.time() - start_time
+                self.logger.info(
+                    "Đã tìm thấy %d word groups trong %.2f giây", 
+                    len(result), duration
+                )
+                return result
+            else:
+                self.logger.debug("Sử dụng fallback method để tìm word groups")
+                result = self._find_word_groups_fallback(word_items, transcript_lines)
+                duration = time.time() - start_time
+                self.logger.info(
+                    "Đã tìm thấy %d word groups (fallback) trong %.2f giây", 
+                    len(result), duration
+                )
+                return result
+                
+        except Exception as e:
+            self.logger.error(
+                "Lỗi khi tìm word groups: %s. Sử dụng fallback method.", 
+                str(e), 
+                exc_info=True
+            )
+            result = self._find_word_groups_fallback(word_items, transcript_lines)
+            self.logger.warning("Đã sử dụng fallback method, tìm thấy %d word groups", len(result))
+            return result
+    
 
     async def process(self, input_data: List[Dict], **kwargs) -> List[Dict]:
+        """
+        Xử lý transcript và tạo text overlay với timing chính xác.
+        
+        Args:
+            input_data: Danh sách các segment cần xử lý
+            **kwargs: Các tham số bổ sung, có thể chứa context
+            
+        Returns:
+            List[Dict]: Danh sách các segment đã được xử lý với text_over
+            
+        Raises:
+            ProcessingError: Nếu có lỗi trong quá trình xử lý
+        """
+        self.logger.info("Bắt đầu xử lý %d segments", len(input_data))
+        start_time = time.time()
         metric = self._start_processing(ProcessingStage.TEXT_OVERLAY)
-        context = kwargs.get("context")
+        
         try:
-            for segment in input_data:
+            context = kwargs.get("context", {})
+            self.logger.debug("Context: %s", context)
+            
+            for idx, segment in enumerate(input_data, 1):
+                segment_id = segment.get('id', f'unknown_{idx}')
+                self.logger.info("Xử lý segment %s (%d/%d)", segment_id, idx, len(input_data))
+                
                 voice_over = segment.get('voice_over')
                 if not voice_over:
+                    self.logger.warning("Segment %s không có voice_over, bỏ qua", segment_id)
                     continue
+                    
                 audio_path = voice_over.get('local_path')
+                if not audio_path or not os.path.exists(audio_path):
+                    self.logger.error("Không tìm thấy file audio: %s", audio_path)
+                    continue
+                    
                 transcript_content = voice_over.get('content', '')
+                if not transcript_content:
+                    self.logger.warning("Segment %s không có nội dung transcript", segment_id)
+                    continue
+                
+                # Log thông tin cơ bản
+                self.logger.debug("Segment %s - Audio: %s (%.2f KB)", 
+                               segment_id, 
+                               os.path.basename(audio_path),
+                               os.path.getsize(audio_path) / 1024)
+                
+                # Xử lý transcript
                 transcript_lines = voice_over.get('transcript_lines')
                 if not transcript_lines:
+                    self.logger.debug("Phân đoạn transcript bằng LLM...")
                     transcript_lines = await self._split_transcript_by_llm(transcript_content)
+                    self.logger.debug("Đã phân đoạn thành %d dòng", len(transcript_lines))
                 
-                # Gửi transcript GỐC cho Gentle (không phải đã chia nhỏ)
-                joined_transcript = transcript_content  # Giữ nguyên transcript gốc
-                
-                # Nếu cần, lấy temp_dir từ context
+                # Tạo file tạm cho Gentle
                 temp_dir = None
                 if context:
                     temp_dir = context.get('temp_dir') if isinstance(context, dict) else getattr(context, 'temp_dir', None)
-                # Tạo file tạm trong temp_dir nếu có
-                if temp_dir:
-                    transcript_path = os.path.join(temp_dir, f"transcript_{segment.get('id', '')}.txt")
-                    with open(transcript_path, "w", encoding="utf-8") as f:
-                        f.write(joined_transcript)
-                else:
-                    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as f:
-                        f.write(joined_transcript)
-                        transcript_path = f.name
-                with open(audio_path, "rb") as a_file, open(transcript_path, "rb") as t_file:
-                    files = {"audio": a_file, "transcript": t_file}
-                    response = requests.post(
-                        "http://localhost:8765/transcriptions?async=false",
-                        files=files,
-                        timeout=settings.gentle_timeout
-                    )
-                    response.raise_for_status()  # Raise HTTPError for bad responses
-                result = response.json()
-                word_items = [w for w in result["words"] if w.get("case") == "success"]
-                segment["text_over"] = await self._find_word_groups(word_items, transcript_lines)
+                
+                transcript_path = None
+                try:
+                    if temp_dir:
+                        os.makedirs(temp_dir, exist_ok=True)
+                        transcript_path = os.path.join(temp_dir, f"transcript_{segment_id}.txt")
+                        with open(transcript_path, "w", encoding="utf-8") as f:
+                            f.write(transcript_content)
+                        self.logger.debug("Đã lưu transcript tạm tại: %s", transcript_path)
+                    else:
+                        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as f:
+                            f.write(transcript_content)
+                            transcript_path = f.name
+                        self.logger.debug("Đã tạo file tạm: %s", transcript_path)
+                    
+                    # Gọi Gentle API
+                    self.logger.info("Gọi Gentle API để align audio và transcript...")
+                    gentle_start = time.time()
+                    
+                    with open(audio_path, "rb") as a_file, open(transcript_path, "rb") as t_file:
+                        files = {"audio": a_file, "transcript": t_file}
+                        response = requests.post(
+                            "http://localhost:8765/transcriptions?async=false",
+                            files=files,
+                            timeout=settings.gentle_timeout
+                        )
+                        response.raise_for_status()
+                    
+                    gentle_time = time.time() - gentle_start
+                    self.logger.info("Gentle hoàn thành trong %.2f giây", gentle_time)
+                    
+                    result = response.json()
+                    word_items = [w for w in result["words"] if w.get("case") == "success"]
+                    self.logger.debug("Đã nhận được %d từ được align thành công", len(word_items))
+                    
+                    # Tìm word groups
+                    self.logger.debug("Bắt đầu tìm word groups...")
+                    segment["text_over"] = await self._find_word_groups(word_items, transcript_lines)
+                    self.logger.info("Đã tạo %d text_over items", len(segment.get("text_over", [])))
+                    
+                except Exception as e:
+                    self.logger.error("Lỗi khi xử lý segment %s: %s", segment_id, str(e), exc_info=True)
+                    raise
+                    
+                finally:
+                    # Dọn dẹp file tạm
+                    if transcript_path and os.path.exists(transcript_path):
+                        try:
+                            os.remove(transcript_path)
+                            self.logger.debug("Đã xóa file tạm: %s", transcript_path)
+                        except Exception as e:
+                            self.logger.warning("Không thể xóa file tạm %s: %s", transcript_path, str(e))
+            
+            # Kết thúc xử lý
+            total_time = time.time() - start_time
+            self.logger.info("Hoàn thành xử lý %d segments trong %.2f giây", 
+                           len(input_data), total_time)
+            
             self._end_processing(metric, success=True, items_processed=len(input_data))
             return input_data
+            
         except Exception as e:
-            self._end_processing(metric, success=False, error_message=str(e))
-            raise ProcessingError(f"Gentle alignment failed: {e}") from e
+            error_msg = f"Lỗi trong quá trình xử lý: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self._end_processing(metric, success=False, error_message=error_msg)
+            raise ProcessingError(error_msg) from e

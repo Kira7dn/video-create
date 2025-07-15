@@ -39,7 +39,7 @@ class TextOverlayProcessor:
         return "1.0"
     
     @staticmethod
-    def build_drawtext_filter(text_over, total_duration):
+    def build_drawtext_filter(text_over, total_duration, delay=0.0):
         """Build drawtext filter without unsupported alpha parameter"""
         if not text_over.get("text"):
             return None
@@ -48,7 +48,7 @@ class TextOverlayProcessor:
         safe_text = TextOverlayProcessor._escape_text_for_ffmpeg(text_over['text'])
         
         # Calculate timing
-        text_start = float(text_over.get('start', text_over.get('start_time', 0)))
+        text_start = float(text_over.get('start_time', 0)) + delay
         text_duration = text_over.get('duration')
         text_end = text_over.get('end')
         
