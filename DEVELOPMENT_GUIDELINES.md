@@ -1,7 +1,3 @@
----
-trigger: always_on
----
-
 # Video Creation Service - Development Guidelines
 
 > **⚠️ IMPORTANT**: This document extends and clarifies the rules in `.github/copilot-instructions.md`.
