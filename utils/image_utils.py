@@ -1,9 +1,41 @@
-import cv2
+"""
+Image processing utilities for video creation.
+
+This module provides functions for image manipulation, enhancement, and validation
+for use in video creation pipelines.
+"""
+
 import os
-import numpy as np
 from typing import List, Union, Optional, Tuple
-from PIL import Image
+import cv2
+import numpy as np
+
+
+import numpy.typing as npt
 import requests
+from PIL import Image
+
+# Type aliases
+CV2Image = npt.NDArray[np.uint8]
+
+# Add type stubs for cv2 members
+cv2.imread = cv2.imread  # type: ignore[assignment]
+cv2.resize = cv2.resize  # type: ignore[assignment]
+cv2.copyMakeBorder = cv2.copyMakeBorder  # type: ignore[assignment]
+cv2.imwrite = cv2.imwrite  # type: ignore[assignment]
+cv2.cvtColor = cv2.cvtColor  # type: ignore[assignment]
+cv2.GaussianBlur = cv2.GaussianBlur  # type: ignore[assignment]
+cv2.addWeighted = cv2.addWeighted  # type: ignore[assignment]
+cv2.createCLAHE = cv2.createCLAHE  # type: ignore[attr-defined]
+
+# Add constants
+cv2.INTER_AREA = cv2.INTER_AREA if hasattr(cv2, "INTER_AREA") else 3
+cv2.BORDER_CONSTANT = cv2.BORDER_CONSTANT if hasattr(cv2, "BORDER_CONSTANT") else 0
+cv2.COLOR_BGR2LAB = cv2.COLOR_BGR2LAB if hasattr(cv2, "COLOR_BGR2LAB") else 44
+cv2.COLOR_LAB2BGR = cv2.COLOR_LAB2BGR if hasattr(cv2, "COLOR_LAB2BGR") else 56
+cv2.COLOR_BGR2HSV = cv2.COLOR_BGR2HSV if hasattr(cv2, "COLOR_BGR2HSV") else 40
+cv2.COLOR_HSV2BGR = cv2.COLOR_HSV2BGR if hasattr(cv2, "COLOR_HSV2BGR") else 54
+
 
 
 def get_smart_pad_color(
@@ -129,7 +161,7 @@ def process_image(
     target_w = target_w - (target_w % 2)
     target_h = target_h - (target_h % 2)
 
-    for i, path in enumerate(image_paths):
+    for _, path in enumerate(image_paths):
         img = cv2.imread(path)
         if img is None:
             raise FileNotFoundError(f"Image not found or unreadable: {path}")
@@ -274,15 +306,15 @@ def auto_enhance_image(
 def is_image_size_valid(image_path: str, min_width: int, min_height: int) -> bool:
     """
     Kiểm tra kích thước ảnh có đạt chuẩn không.
-    
+
     Args:
         image_path: Đường dẫn đến file ảnh
         min_width: Chiều rộng tối thiểu (pixels)
         min_height: Chiều cao tối thiểu (pixels)
-        
+
     Returns:
         bool: True nếu ảnh đạt chuẩn kích thước, False nếu không
-        
+
     Examples:
         >>> is_image_size_valid("image.jpg", 1280, 720)
         True
@@ -292,27 +324,18 @@ def is_image_size_valid(image_path: str, min_width: int, min_height: int) -> boo
     # Validate input parameters
     if not image_path or not os.path.exists(image_path):
         return False
-        
+
     if min_width <= 0 or min_height <= 0:
         return False
-    
+
     try:
         with Image.open(image_path) as img:
             width, height = img.size
             is_valid = width >= min_width and height >= min_height
-            
-            # Optional: Add debug logging (can be enabled if needed)
-            # print(f"Image {image_path}: {width}x{height} (min: {min_width}x{min_height}) -> {'Valid' if is_valid else 'Invalid'}")
-            
+
             return is_valid
-            
-    except (IOError, OSError, ValueError) as e:
-        # Specific image-related errors
-        # print(f"Error reading image {image_path}: {e}")
-        return False
-    except Exception as e:
-        # Catch-all for unexpected errors
-        # print(f"Unexpected error checking image {image_path}: {e}")
+
+    except (IOError, OSError, ValueError):
         return False
 
 
@@ -320,21 +343,25 @@ def search_pixabay_image(
     prompt: str, api_key: str, min_width: int, min_height: int
 ) -> Optional[str]:
     """
-    Tìm kiếm ảnh từ Pixabay API theo prompt và filter theo kích thước tối thiểu.
-    Trả về url ảnh đầu tiên phù hợp hoặc None nếu không tìm thấy.
-    
-    Strategy:
-    1. Ưu tiên largeImageURL (thường có kích thước lớn hơn)
-    2. Fallback về webformatURL nếu không có large
-    3. Filter dựa trên actual size requirements
+    Search for an image on Pixabay that matches the given criteria.
+
+    Args:
+        prompt: Search query string
+        api_key: Pixabay API key
+        min_width: Minimum required width in pixels
+        min_height: Minimum required height in pixels
+
+    Returns:
+        URL of the first matching image, or None if no match found
     """
+
     url = "https://pixabay.com/api/"
-    
+
     # Set reasonable API filter since we prioritize large/fullHD images
     # These are typically much larger than min requirements
     api_min_width = max(800, min_width)  # Don't go below 800px
     api_min_height = max(600, min_height)  # Don't go below 600px
-    
+
     params = {
         "key": api_key,
         "q": prompt,
@@ -349,34 +376,34 @@ def search_pixabay_image(
         "min_height": api_min_height,
         "per_page": 20,  # Increased for better chances
     }
-    
+
     try:
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         hits = data.get("hits", [])
-        
+
         # Priority 1: Tìm largeImageURL từ tất cả hits
         for hit in hits:
             large_url = hit.get("largeImageURL")
             if large_url:
                 # Assume large images are usually big enough (typically 1920x1080+)
                 return large_url
-        
+
         # Priority 2: Tìm fullHDURL từ tất cả hits
         for hit in hits:
             fullhd_url = hit.get("fullHDURL")
             if fullhd_url:
                 # FullHD usually 1920x1080, good for most cases
                 return fullhd_url
-        
+
         # Priority 3: Tìm imageURL (preview) từ tất cả hits
         for hit in hits:
             image_url = hit.get("imageURL")
             if image_url:
                 # Last resort, might be smaller but better than nothing
                 return image_url
-        
+
         # Fallback: remove size constraints entirely and retry
         if not hits:
             params.pop("min_width", None)
@@ -385,14 +412,16 @@ def search_pixabay_image(
             resp.raise_for_status()
             data = resp.json()
             hits = data.get("hits", [])
-            
+
             if hits:
                 first_hit = hits[0]
-                return (first_hit.get("largeImageURL") or 
-                       first_hit.get("fullHDURL") or 
-                       first_hit.get("imageURL"))
-                
-    except Exception as e:
-        # Could add logging here if needed
-        pass
+                return (
+                    first_hit.get("largeImageURL")
+                    or first_hit.get("fullHDURL")
+                    or first_hit.get("imageURL")
+                )
+
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        # Log the error for debugging if needed
+        print(f"Error searching Pixabay: {exc}")
     return None

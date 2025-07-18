@@ -57,10 +57,10 @@ class PerformanceMonitor:
             metrics = self.metrics[operation_name]
 
             if success:
-                logger.info(f"✅ {operation_name} completed in {metrics.duration:.2f}s")
+                logger.info("✅ %s completed in %.2fs", operation_name, metrics.duration)
             else:
                 logger.error(
-                    f"❌ {operation_name} failed after {metrics.duration:.2f}s: {error}"
+                    "❌ %s failed after %.2fs: %s", operation_name, metrics.duration, error
                 )
 
     def get_summary(self) -> Dict[str, Any]:
@@ -90,13 +90,13 @@ def performance_monitor(operation_name: Optional[str] = None):
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
             monitor = PerformanceMonitor()
-            metrics = monitor.start_operation(op_name)
+            _ = monitor.start_operation(op_name)  # Store metrics for tracking
 
             try:
                 result = func(*args, **kwargs)
                 monitor.complete_operation(op_name, success=True)
                 return result
-            except Exception as e:
+            except (ValueError, TypeError, IOError) as e:
                 monitor.complete_operation(op_name, success=False, error=str(e))
                 raise
 
@@ -116,13 +116,13 @@ def async_performance_monitor(operation_name: Optional[str] = None):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs) -> T:
             monitor = PerformanceMonitor()
-            metrics = monitor.start_operation(op_name)
+            _ = monitor.start_operation(op_name)  # Store metrics for tracking
 
             try:
                 result = await func(*args, **kwargs)
                 monitor.complete_operation(op_name, success=True)
                 return result
-            except Exception as e:
+            except (ValueError, TypeError, IOError) as e:
                 monitor.complete_operation(op_name, success=False, error=str(e))
                 raise
 
@@ -204,16 +204,16 @@ def retry_with_backoff(
             for attempt in range(max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
-                except Exception as e:
+                except (ValueError, TypeError, IOError) as e:
                     last_exception = e
                     if attempt < max_retries:
                         delay = min(base_delay * (2**attempt), max_delay)
                         logger.warning(
-                            f"Attempt {attempt + 1} failed, retrying in {delay:.1f}s: {e}"
+                            "Attempt %d failed, retrying in %.1fs: %s", attempt + 1, delay, e
                         )
                         await asyncio.sleep(delay)
                     else:
-                        logger.error(f"All {max_retries + 1} attempts failed: {e}")
+                        logger.error("All %d attempts failed: %s", max_retries + 1, e)
 
             # This should never be None, but satisfy type checker
             if last_exception:

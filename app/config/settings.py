@@ -2,10 +2,9 @@
 Application configuration using Pydantic Settings
 """
 
+from typing import List, Union
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
-from typing import Optional, List, Union
-import os
 
 
 class Settings(BaseSettings):
@@ -42,10 +41,25 @@ class Settings(BaseSettings):
     @field_validator("cors_origins")
     @classmethod
     def parse_cors_origins(cls, v):
+        """Parse CORS origins from string to list.
+
+        Args:
+            v: Can be either a list of origins or a comma-separated string.
+               If "*" is provided, allows all origins.
+
+        Returns:
+            List[str]: List of allowed origins
+
+        Example:
+            >>> parse_cors_origins("http://localhost:3000,http://localhost:8080")
+            ['http://localhost:3000', 'http://localhost:8080']
+            >>> parse_cors_origins("*")
+            ['*']
+        """
         if isinstance(v, str):
             if v == "*":
                 return ["*"]
-            return [origin.strip() for origin in v.split(",")]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
     # Logging Settings
@@ -119,7 +133,6 @@ class Settings(BaseSettings):
 
     # Security Settings
     request_timeout: int = 300  # 5 minutes
-    gentle_timeout: int = 120  # 2 minutes for Gentle server (audio processing takes time)
     max_concurrent_requests: int = 10
 
     # Ngrok Settings
@@ -143,6 +156,22 @@ class Settings(BaseSettings):
     video_min_image_width: int = 1024  # Minimum image width for video segments
     video_min_image_height: int = 576  # Minimum image height for video segments
     pixabay_api_key: str = ""  # API key for Pixabay image search
+
+    # Gentle Settings
+    gentle_timeout: int = 120
+
+    @property
+    def gentle_url(self) -> str:
+        import os
+        # Ưu tiên biến môi trường
+        if os.getenv("GENTLE_URL"):
+            return os.getenv("GENTLE_URL")
+        # Nếu chạy Docker
+        if os.getenv("DOCKER") == "1" or os.getenv("GENTLE_DOCKER") == "true":
+            return "http://gentle:8765/transcriptions"
+        # Mặc định local
+        return "http://localhost:8765/transcriptions"
+
 
     model_config = {
         "env_file": ".env",
