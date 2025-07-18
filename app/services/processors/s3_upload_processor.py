@@ -29,6 +29,30 @@ class S3UploadProcessor(BaseProcessor):
     def __init__(self, metrics_collector: Optional[MetricsCollector] = None):
         super().__init__(metrics_collector)
         self.logger = logging.getLogger(__name__)
+        
+    async def _process_async(self, input_data: Any, **kwargs) -> str:
+        """Async implementation of S3 upload processing.
+        
+        Args:
+            input_data: Path to the video file to upload. Could be a coroutine that resolves to a path.
+            **kwargs: Additional parameters, must contain 'context' with video_id.
+                
+        Returns:
+            str: S3 URL of the uploaded video or local path if S3 not configured.
+                
+        Raises:
+            ProcessingError: If upload fails or required parameters are missing.
+        """
+        # If input_data is a coroutine, await it to get the actual path
+        if asyncio.iscoroutine(input_data):
+            input_data = await input_data
+            
+        # Ensure we have a string path
+        if not isinstance(input_data, (str, bytes, os.PathLike)):
+            raise ProcessingError(f"Expected file path, got {type(input_data).__name__}")
+            
+        # Process with the actual path
+        return await self.process(input_data, **kwargs)
 
     async def process(self, input_data: Any, **kwargs) -> str:
         """

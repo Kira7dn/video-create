@@ -2,14 +2,15 @@
 Validation processor for video creation requests
 """
 
+import logging
 from typing import Dict, List, Any, Optional
+
 from app.services.processors.base_processor import (
     Validator,
     ValidationResult,
     ProcessingStage,
     MetricsCollector,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,10 @@ class VideoRequestValidator(Validator):
         ]
         self.supported_transition_types = ["fade", "fadeblack", "fadewhite", "cut"]
 
-    async def validate(self, data: Dict[str, Any]) -> ValidationResult:
+    def validate(self, data: Dict[str, Any]) -> ValidationResult:
         """Validate video creation request data"""
-        metric = self._start_processing(ProcessingStage.VALIDATION)
         result = ValidationResult()
+        metric = self._start_processing(ProcessingStage.VALIDATION)
 
         try:
             # Basic structure validation
@@ -59,20 +60,27 @@ class VideoRequestValidator(Validator):
                 if "transitions" in data:
                     self._validate_transitions(data["transitions"], result)
 
+            return result
+
+        except (ValueError, KeyError, TypeError) as e:
+            # Catch specific exceptions that might occur during validation
+            error_msg = f"Validation error: {str(e)}"
+            result.add_error(error_msg)
+            return result
+
+        except Exception as e:  # noqa: BLE001
+            # Catch any other unexpected errors
+            error_msg = f"Unexpected error during validation: {str(e)}"
+            raise RuntimeError(error_msg) from e
+
+        finally:
+            # Always end the processing metric
             self._end_processing(
                 metric,
                 success=result.is_valid,
                 error_message="; ".join(result.errors) if result.errors else None,
                 items_processed=len(data.get("segments", [])),
             )
-
-            return result
-
-        except Exception as e:
-            error_msg = f"Validation failed: {e}"
-            result.add_error(error_msg)
-            self._end_processing(metric, success=False, error_message=error_msg)
-            return result
 
     def _validate_basic_structure(self, data: Dict[str, Any], result: ValidationResult):
         """Validate basic request structure"""

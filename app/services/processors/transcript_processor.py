@@ -142,6 +142,30 @@ class TranscriptProcessor(BaseProcessor):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.logger.setLevel(logging.DEBUG)
 
+    async def _process_async(self, input_data: List[Dict], **kwargs) -> List[Dict]:
+        """Async implementation of transcript processing.
+
+        Args:
+            input_data: List of segments to process, each containing:
+                - id: Unique identifier for the segment
+                - voice_over: Dict containing audio and transcript info:
+                    - local_path: Path to the audio file
+                    - content: Transcript content
+                    - transcript_lines: (optional) Pre-segmented transcript lines
+            **kwargs: Additional parameters:
+                - context: Additional context information
+                - temp_dir: Temporary directory for storing intermediate files
+
+        Returns:
+            List[Dict]: Processed segments with 'text_over' field added
+
+        Raises:
+            ProcessingError: If a critical error occurs during processing
+        """
+        # Delegate to the existing sync process method for now
+        # This maintains compatibility while allowing for future async optimization
+        return self.process(input_data, **kwargs)
+
     def validate_audio_file(self, audio_path: str) -> None:
         """
         Kiểm tra và xác thực file audio trước khi xử lý.

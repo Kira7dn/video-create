@@ -183,7 +183,10 @@ def align_audio_with_transcript(
                 raise
 
         except requests.exceptions.Timeout as e:
-            last_error = f"Request timed out after {request_timeout}s (attempt {attempt}/{max_retries})"
+            last_error = (
+                f"Request timed out after {request_timeout}s "
+                f"(attempt {attempt}/{max_retries})"
+            )
             logger.error("Gentle API timeout: %s", str(e), exc_info=True)
             print("Warning: %s", last_error, file=sys.stderr)
 

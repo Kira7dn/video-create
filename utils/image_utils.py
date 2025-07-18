@@ -18,16 +18,6 @@ from PIL import Image
 # Type aliases
 CV2Image = npt.NDArray[np.uint8]
 
-# Add type stubs for cv2 members
-cv2.imread = cv2.imread  # type: ignore[assignment]
-cv2.resize = cv2.resize  # type: ignore[assignment]
-cv2.copyMakeBorder = cv2.copyMakeBorder  # type: ignore[assignment]
-cv2.imwrite = cv2.imwrite  # type: ignore[assignment]
-cv2.cvtColor = cv2.cvtColor  # type: ignore[assignment]
-cv2.GaussianBlur = cv2.GaussianBlur  # type: ignore[assignment]
-cv2.addWeighted = cv2.addWeighted  # type: ignore[assignment]
-cv2.createCLAHE = cv2.createCLAHE  # type: ignore[attr-defined]
-
 # Add constants
 cv2.INTER_AREA = cv2.INTER_AREA if hasattr(cv2, "INTER_AREA") else 3
 cv2.BORDER_CONSTANT = cv2.BORDER_CONSTANT if hasattr(cv2, "BORDER_CONSTANT") else 0
@@ -35,7 +25,6 @@ cv2.COLOR_BGR2LAB = cv2.COLOR_BGR2LAB if hasattr(cv2, "COLOR_BGR2LAB") else 44
 cv2.COLOR_LAB2BGR = cv2.COLOR_LAB2BGR if hasattr(cv2, "COLOR_LAB2BGR") else 56
 cv2.COLOR_BGR2HSV = cv2.COLOR_BGR2HSV if hasattr(cv2, "COLOR_BGR2HSV") else 40
 cv2.COLOR_HSV2BGR = cv2.COLOR_HSV2BGR if hasattr(cv2, "COLOR_HSV2BGR") else 54
-
 
 
 def get_smart_pad_color(

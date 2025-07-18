@@ -6,25 +6,140 @@ It handles processing of both image and video segments, applying transitions,
 and combining with audio to produce final video segments.
 """
 
-import os
-import uuid
-import subprocess
-from typing import Dict
+import asyncio
 import logging
-from app.core.exceptions import VideoCreationError
-from app.config.settings import settings
+import os
+import subprocess
+import uuid
+from typing import Any, Dict
+
+from app.config import settings
+from app.core.exceptions import ProcessingError, VideoCreationError
 from app.services.processors.audio_processor import AudioProcessor
+from app.services.processors.base_processor import ProcessingStage
 from app.services.processors.text_overlay_processor import TextOverlayProcessor
 from app.services.processors.transition_processor import TransitionProcessor
+from app.services.processors.base_processor import BaseProcessor
+from app.services.processors.interfaces import ISegmentProcessor
 from utils.subprocess_utils import safe_subprocess_run
 from utils.image_utils import process_image
 
 logger = logging.getLogger(__name__)
 
-class SegmentProcessor:
+
+class SegmentProcessor(BaseProcessor, ISegmentProcessor):
     """Handles creation of a single video segment clip from a segment dict"""
+
+    def __init__(self, metrics_collector=None):
+        super().__init__(metrics_collector)
+        # AudioProcessor is a static class and doesn't need metrics_collector
+        self.audio_processor = AudioProcessor
+        self.text_processor = TextOverlayProcessor()
+        self.transition_processor = TransitionProcessor()
+
+    async def _process_async(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """Process input data asynchronously by delegating to process_segment.
+
+        This method implements the abstract method from BaseProcessor.
+
+        Args:
+            input_data: Dictionary containing segment information
+            **kwargs: Additional processing parameters
+
+        Returns:
+            Dictionary containing processing results
+        """
+        return await self.process_segment(input_data, **kwargs)
+        
+    async def process(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """Process input data by delegating to _process_async.
+        
+        This method is maintained for backward compatibility.
+        
+        Args:
+            input_data: Dictionary containing segment information
+            **kwargs: Additional processing parameters
+            
+        Returns:
+            Dictionary containing processing results
+            
+        Raises:
+            ProcessingError: If processing fails
+        """
+        return await self._process_async(input_data, **kwargs)
+
+    async def process_segment(
+        self, segment: Dict[str, Any], temp_dir: str, **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Process a single video segment.
+
+        This is the main entry point that implements the ISegmentProcessor interface.
+        It wraps the existing create_segment_clip functionality with proper error handling
+        and metrics collection.
+        """
+        try:
+            metric = self._start_processing(ProcessingStage.SEGMENT_CREATION)
+            segment_id = segment.get("id", "unknown")
+
+            logger.debug("Processing segment %s", segment_id)
+            output_path = await self._create_segment_clip_async(
+                segment, temp_dir, **kwargs
+            )
+
+            self._end_processing(metric, success=True, items_processed=1)
+
+            return {
+                "id": segment_id,
+                "path": output_path,
+                "duration": self._get_duration(output_path),
+            }
+
+        except Exception as e:
+            error_msg = (
+                f"Failed to process segment {segment.get('id', 'unknown')}: {str(e)}"
+            )
+            if 'metric' in locals():
+                self._end_processing(
+                    metric, success=False, error_message=error_msg, items_processed=0
+                )
+            raise ProcessingError(error_msg) from e
+
     @staticmethod
-    def create_segment_clip(segment: Dict, temp_dir: str) -> str:
+    def _get_duration(video_path: str) -> float:
+        """Get duration of a video file in seconds"""
+        try:
+            cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return float(result.stdout.strip())
+        except (subprocess.CalledProcessError, ValueError) as e:
+            logger.warning(
+                "Could not determine duration for %s: %s", video_path, str(e)
+            )
+            return 0.0
+
+    async def _create_segment_clip_async(
+        self, segment: Dict[str, Any], temp_dir: str, **_
+    ) -> str:
+        """Async wrapper around the existing create_segment_clip method"""
+        # For now, we'll run the sync version in a thread pool
+        # This can be optimized later with native async FFmpeg
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.create_segment_clip(segment, temp_dir)
+        )
+
+    @classmethod
+    def create_segment_clip(cls, segment: Dict, temp_dir: str) -> str:
         """Create a video segment clip from segment data.
 
         Args:
@@ -49,7 +164,7 @@ class SegmentProcessor:
         if not isinstance(transition_in, dict):
             logger.warning("transition_in is not a dictionary, using default values")
             transition_in = {}
-            
+
         transition_out = segment.get("transition_out") or {}
         if not isinstance(transition_out, dict):
             logger.warning("transition_out is not a dictionary, using default values")
@@ -63,10 +178,18 @@ class SegmentProcessor:
             input_path = video_path
             try:
                 probe_cmd = [
-                    "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                    "-of", "csv=p=0", video_path
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "csv=p=0",
+                    video_path,
                 ]
-                result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                result = subprocess.run(
+                    probe_cmd, capture_output=True, text=True, check=True
+                )
                 duration_str = result.stdout.strip()
                 if not duration_str:
                     raise ValueError("Empty duration output from ffprobe")
@@ -77,7 +200,7 @@ class SegmentProcessor:
                     "using default 4.0s. Error: %s\nCommand output: %s",
                     segment_id,
                     str(e),
-                    getattr(e, 'stderr', 'No stderr')
+                    getattr(e, "stderr", "No stderr"),
                 )
                 original_duration = 4.0
             audio_input_path = video_path
@@ -101,25 +224,38 @@ class SegmentProcessor:
             input_path = processed_image_paths[0]
             audio_path = AudioProcessor.create_audio_composition(segment, temp_dir)
             if not audio_path:
-                raise VideoCreationError("Audio composition failed or missing for segment")
+                raise VideoCreationError(
+                    "Audio composition failed or missing for segment"
+                )
             try:
                 probe_cmd = [
-                    "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                    "-of", "csv=p=0", audio_path
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "csv=p=0",
+                    audio_path,
                 ]
-                result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                result = subprocess.run(
+                    probe_cmd, capture_output=True, text=True, check=True
+                )
                 original_duration = float(result.stdout.strip())
             except subprocess.CalledProcessError as e:
                 logger.warning(
                     "Could not get audio duration for segment %s: %s",
-                    segment_id, str(e)
+                    segment_id,
+                    str(e),
                 )
                 original_duration = 4.0
             fade_in_duration = float(transition_in.get("duration", 0) or 0)
             fade_out_duration = float(transition_out.get("duration", 0) or 0)
             extended_audio_path = audio_path
             if fade_in_duration > 0 or fade_out_duration > 0:
-                extended_audio_path = os.path.join(temp_dir, f"extended_audio_{segment_id}.wav")
+                extended_audio_path = os.path.join(
+                    temp_dir, f"extended_audio_{segment_id}.wav"
+                )
                 audio_inputs = []
                 if fade_in_duration > 0:
                     audio_inputs.append(
@@ -142,13 +278,20 @@ class SegmentProcessor:
                 for inp in audio_inputs:
                     extend_cmd += inp.split()
                 extend_cmd += [
-                    "-filter_complex", filter_str,
-                    "-map", "[aout]", "-ac", "2", "-ar", "44100", extended_audio_path
+                    "-filter_complex",
+                    filter_str,
+                    "-map",
+                    "[aout]",
+                    "-ac",
+                    "2",
+                    "-ar",
+                    "44100",
+                    extended_audio_path,
                 ]
                 safe_subprocess_run(
                     extend_cmd,
                     f"Create extended audio for segment {segment_id}",
-                    logger
+                    logger,
                 )
             audio_input_path = extended_audio_path
 
@@ -156,25 +299,33 @@ class SegmentProcessor:
         audio_filters = ["volume=1.5"]
         fade_in_duration = float(transition_in.get("duration", 0) or 0)
         fade_out_duration = float(transition_out.get("duration", 0) or 0)
-        fade_in_type = (transition_in.get("type", "fade").lower()
-                       if transition_in.get("type") else "fade")
-        fade_out_type = (transition_out.get("type", "fade").lower()
-                        if transition_out.get("type") else "fade")
+        fade_in_type = (
+            transition_in.get("type", "fade").lower()
+            if transition_in.get("type")
+            else "fade"
+        )
+        fade_out_type = (
+            transition_out.get("type", "fade").lower()
+            if transition_out.get("type")
+            else "fade"
+        )
         if fade_in_duration > 0:
             if TransitionProcessor.is_preprocessing_supported(fade_in_type):
                 TransitionProcessor.apply_transition_in_filter(
                     video_filters, audio_filters, fade_in_type, fade_in_duration
                 )
-                transition_type = 'overlay' if input_type == 'video' else 'additive'
+                transition_type = "overlay" if input_type == "video" else "additive"
                 logger.debug(
                     "Applied %s transition-in: %ss (%s)",
-                    fade_in_type, fade_in_duration, transition_type
+                    fade_in_type,
+                    fade_in_duration,
+                    transition_type,
                 )
             else:
                 logger.warning(
                     "Transition-in type '%s' not supported for "
                     "preprocessing, using basic fade",
-                    fade_in_type
+                    fade_in_type,
                 )
                 fade_in_type = "fade"
                 video_filters.append(f"fade=t=in:st=0:d={fade_in_duration}")
@@ -187,23 +338,33 @@ class SegmentProcessor:
             )
             if TransitionProcessor.is_preprocessing_supported(fade_out_type):
                 TransitionProcessor.apply_transition_out_filter(
-                    video_filters, audio_filters,
-                    fade_out_type, fade_out_duration, fade_out_start
+                    video_filters,
+                    audio_filters,
+                    fade_out_type,
+                    fade_out_duration,
+                    fade_out_start,
                 )
-                transition_type = 'overlay' if input_type == 'video' else 'additive'
+                transition_type = "overlay" if input_type == "video" else "additive"
                 logger.debug(
                     "Applied %s transition-out: %ss starting at %ss (%s)",
-                    fade_out_type, fade_out_duration, fade_out_start, transition_type
+                    fade_out_type,
+                    fade_out_duration,
+                    fade_out_start,
+                    transition_type,
                 )
             else:
                 logger.warning(
                     "Transition-out type '%s' not supported for "
                     "preprocessing, using basic fade",
-                    fade_out_type
+                    fade_out_type,
                 )
                 fade_out_type = "fade"
-                video_filters.append(f"fade=t=out:st={fade_out_start}:d={fade_out_duration}")
-                audio_filters.append(f"afade=t=out:st={fade_out_start}:d={fade_out_duration}")
+                video_filters.append(
+                    f"fade=t=out:st={fade_out_start}:d={fade_out_duration}"
+                )
+                audio_filters.append(
+                    f"afade=t=out:st={fade_out_start}:d={fade_out_duration}"
+                )
 
         # Calculate total duration
         total_duration = (
@@ -230,29 +391,63 @@ class SegmentProcessor:
         # Build FFmpeg command based on input type
         if input_type == "video":
             ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-                "-i", input_path,
-                "-vf", ",".join(video_filters),
-                "-af", ",".join(audio_filters),
-                "-t", str(total_duration),
-                "-map", "1:v", "-map", "0:a",
-                "-pix_fmt", "yuv420p",
-                "-r", str(settings.video_default_fps),
-                "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", segment_output_path
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-i",
+                input_path,
+                "-vf",
+                ",".join(video_filters),
+                "-af",
+                ",".join(audio_filters),
+                "-t",
+                str(total_duration),
+                "-map",
+                "1:v",
+                "-map",
+                "0:a",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                str(settings.video_default_fps),
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                segment_output_path,
             ]
         else:
             ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-loop", "1",
-                "-i", input_path,
-                "-i", audio_input_path,
-                "-vf", ",".join(video_filters),
-                "-af", ",".join(audio_filters),
-                "-t", str(total_duration),
-                "-pix_fmt", "yuv420p",
-                "-r", str(settings.video_default_fps),
-                "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k", segment_output_path
+                "ffmpeg",
+                "-y",
+                "-loop",
+                "1",
+                "-i",
+                input_path,
+                "-i",
+                audio_input_path,
+                "-vf",
+                ",".join(video_filters),
+                "-af",
+                ",".join(audio_filters),
+                "-t",
+                str(total_duration),
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                str(settings.video_default_fps),
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                segment_output_path,
             ]
         safe_subprocess_run(ffmpeg_cmd, f"Create segment clip {segment_id}", logger)
         return segment_output_path
