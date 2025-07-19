@@ -1,5 +1,14 @@
 """
-Pipeline pattern implementation for video processing workflow
+Pipeline pattern implementation for video processing workflow.
+
+This module contains the core pipeline implementation including:
+- PipelineContext: Context object passed through pipeline stages
+- PipelineStage: Abstract base class for all pipeline stages
+- ProcessorPipelineStage: Stage that wraps a processor
+- FunctionPipelineStage: Stage that wraps a function
+- VideoPipeline: Main pipeline implementation
+- ConditionalStage: Stage with conditional execution
+- ParallelStage: Stage that executes multiple stages in parallel
 """
 
 import asyncio
@@ -11,12 +20,9 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from app.core.exceptions import ProcessingError
-from app.services.processors.base_processor import (
-    BaseProcessor,
-    MetricsCollector,
-    Validator,
-)
-from app.services.processors.pydantic_ai_validator import PydanticAIValidator
+from app.services.processors.core.base_processor import BaseProcessor, Validator
+from app.services.processors.core.metrics import MetricsCollector
+from app.services.processors.validation.core.base_validator import PydanticAIValidator
 
 logger = logging.getLogger(__name__)
 
@@ -152,43 +158,95 @@ class FunctionPipelineStage(PipelineStage):
     def __init__(
         self,
         name: str,
-        func: Callable[[PipelineContext], Any],
+        func: Optional[Callable[[PipelineContext], Any]] = None,
+        func_name: Optional[str] = None,
         output_key: Optional[str] = None,
         required_inputs: Optional[List[str]] = None,
     ):
         super().__init__(name, required_inputs)
         self.func = func
+        self.func_name = func_name  # Tên function để bind sau
         self.output_key = output_key
 
     async def execute(self, context: PipelineContext) -> PipelineContext:
-        """Execute function and optionally store result in context"""
+        """
+        Execute function and optionally store result in context
+
+        Raises:
+            ProcessingError: Nếu function chưa được bind hoặc có lỗi khi thực thi
+        """
+        if self.func is None:
+            raise ProcessingError(
+                f"Function for stage '{self.name}' is not bound. "
+                f"Make sure to set the 'func' attribute or provide a valid function."
+            )
+
         self.validate_inputs(context)
+        self.status = PipelineStageStatus.RUNNING
 
-        # Execute function
-        if asyncio.iscoroutinefunction(self.func):
-            result = await self.func(context)
-        else:
-            result = self.func(context)
+        try:
+            # Gọi function với context
+            if asyncio.iscoroutinefunction(self.func):
+                result = await self.func(context)
+            else:
+                # Nếu function không phải coroutine, chạy trong executor
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, self.func, context)
 
-        # Store result if output key specified
-        if self.output_key:
-            context.set(self.output_key, result)
+            if self.output_key is not None:
+                context.set(self.output_key, result)
 
-        return context
+            self.status = PipelineStageStatus.COMPLETED
+            return context
+
+        except Exception as e:
+            self.status = PipelineStageStatus.FAILED
+            self.logger.error(
+                "Error in function stage '%s': %s", self.name, str(e), exc_info=True
+            )
+            raise ProcessingError(f"Error in function stage '{self.name}': {e}") from e
 
 
 class VideoPipeline:
     """Main pipeline for video processing workflow"""
 
     def __init__(self, metrics_collector: Optional[MetricsCollector] = None):
-        self.stages: List[PipelineStage] = []
+        self._stages: List[PipelineStage] = []
         self.metrics_collector = metrics_collector or MetricsCollector()
         self.logger = logging.getLogger("VideoPipeline")
 
-    def add_stage(self, stage: PipelineStage) -> "VideoPipeline":
-        """Add a stage to the pipeline"""
-        self.stages.append(stage)
-        return self
+    @property
+    def stages(self) -> List[PipelineStage]:
+        """Get the list of pipeline stages"""
+        return self._stages
+
+    def get_stage(self, name: str) -> Optional[PipelineStage]:
+        """
+        Get a stage by name
+
+        Args:
+            name: Name of the stage to find
+
+        Returns:
+            PipelineStage or None if not found
+        """
+        for stage in self._stages:
+            if stage.name == name:
+                return stage
+        return None
+
+    def add_stage(self, stage: PipelineStage) -> PipelineStage:
+        """
+        Add a stage to the pipeline
+
+        Args:
+            stage: Stage to add to the pipeline
+
+        Returns:
+            PipelineStage: The added stage (for method chaining)
+        """
+        self._stages.append(stage)
+        return stage
 
     def add_processor_stage(
         self,
@@ -207,78 +265,123 @@ class VideoPipeline:
     def add_function_stage(
         self,
         name: str,
-        func: Callable,
+        func: Optional[Callable] = None,
+        func_name: Optional[str] = None,
         output_key: Optional[str] = None,
         required_inputs: Optional[List[str]] = None,
-    ) -> "VideoPipeline":
-        """Add a function stage to the pipeline"""
-        stage = FunctionPipelineStage(name, func, output_key, required_inputs)
-        return self.add_stage(stage)
+    ) -> FunctionPipelineStage:
+        """
+        Add a function stage to the pipeline
+
+        Args:
+            name: Tên của stage
+            func: Hàm xử lý (có thể cung cấp sau qua thuộc tính func)
+            func_name: Tên hàm để bind sau (nếu chưa có func)
+            output_key: Khóa để lưu kết quả vào context
+            required_inputs: Danh sách các input bắt buộc
+
+        Returns:
+            FunctionPipelineStage: Đối tượng stage vừa được tạo
+        """
+        stage = FunctionPipelineStage(
+            name=name,
+            func=func,
+            func_name=func_name,
+            output_key=output_key,
+            required_inputs=required_inputs,
+        )
+        self.add_stage(stage)
+        return stage
 
     async def execute(self, context: PipelineContext) -> Dict[str, Any]:
-        """Execute the pipeline with the given context"""
-        self.logger.info("Starting pipeline execution")
+        """
+        Execute the pipeline with the given context
 
-        try:
-            for stage in self.stages:
-                stage_name = stage.name
-                self.logger.info("Executing stage: %s", stage_name)
+        Args:
+            context: The pipeline context containing data and state
 
-                # Record start time for metrics
-                start_time = time.time()
+        Returns:
+            Dict containing execution results and metrics
 
-                try:
-                    # Execute the stage - handle both sync and async execution
-                    if hasattr(stage, "execute") and asyncio.iscoroutinefunction(
-                        stage.execute
-                    ):
-                        await stage.execute(context)
-                    else:
-                        stage.execute(context)
+        Raises:
+            ProcessingError: If any stage fails
+        """
+        results = {}
+        start_time = time.time()
 
-                    # Record success metrics
-                    self.metrics_collector.record_execution_time(
-                        f"pipeline_stage_{stage_name}",
-                        (time.time() - start_time) * 1000,
-                    )
-                    self.metrics_collector.increment_counter(
-                        f"pipeline_stage_{stage_name}_success"
-                    )
+        for stage in self._stages:
+            stage_start = time.time()
+            self.logger.info("Executing stage: %s", stage.name)
 
-                    self.logger.info("Completed stage: %s", stage_name)
+            try:
+                # Execute the stage
+                context = await stage.execute(context)
+                stage_duration = time.time() - stage_start
 
-                except Exception as e:
-                    # Record failure metrics
-                    self.metrics_collector.record_execution_time(
-                        f"pipeline_stage_{stage_name}",
-                        (time.time() - start_time) * 1000,
-                    )
-                    self.metrics_collector.increment_counter(
-                        f"pipeline_stage_{stage_name}_failure"
-                    )
+                # Log success
+                self.logger.info(
+                    "Completed stage %s in %.2fs", stage.name, stage_duration
+                )
 
-                    self.logger.error(
-                        "Error in stage %s: %s", stage_name, str(e), exc_info=True
-                    )
-                    raise ProcessingError(
-                        f"Pipeline failed at stage '{stage_name}': {str(e)}"
-                    ) from e
+                # Collect metrics
+                self.metrics_collector.record_stage(
+                    stage.name, True, stage_duration, 1  # Assuming 1 item processed
+                )
 
-            return context.data
+            except Exception as e:
+                stage_duration = time.time() - stage_start
+                self.logger.error(
+                    "Stage %s failed after %.2fs: %s",
+                    stage.name,
+                    stage_duration,
+                    str(e),
+                    exc_info=True,
+                )
 
-        except Exception as e:
-            self.logger.error("Pipeline execution failed: %s", str(e), exc_info=True)
-            raise ProcessingError(f"Pipeline execution failed: {str(e)}") from e
+                # Record failure in metrics
+                self.metrics_collector.record_stage(
+                    stage.name, False, stage_duration, 0, str(e)
+                )
+
+                # Re-raise with additional context
+                raise ProcessingError(f"Stage '{stage.name}' failed: {e}") from e
+
+        total_duration = time.time() - start_time
+        self.logger.info("Pipeline completed in %.2fs", total_duration)
+
+        # Add execution summary to results
+        results.update(
+            {
+                "success": True,
+                "duration": total_duration,
+                "stages": [
+                    {
+                        "name": stage.name,
+                        "status": stage.status.value,
+                        "duration": getattr(stage, "duration", 0),
+                    }
+                    for stage in self._stages
+                ],
+            }
+        )
+
+        return results
 
     def get_stage_summary(self) -> List[Dict[str, Any]]:
-        """Get summary of all stages"""
+        """
+        Get summary of all stages in the pipeline
+
+        Returns:
+            List[Dict]: List of stage summaries with name, status, duration, and items_processed
+        """
         return [
             {
                 "name": stage.name,
                 "status": stage.status.value,
-                "required_inputs": stage.required_inputs,
+                "duration": getattr(stage, "duration", 0),
+                "items_processed": getattr(stage, "items_processed", 0),
             }
-            for stage in self.stages
+            for stage in self._stages
         ]
 
 

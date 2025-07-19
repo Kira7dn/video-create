@@ -100,7 +100,9 @@ async def create_video(
             result = await video_service.create_video_from_json(json_data)
             job_store = load_job_store()
             job_store[job_id]["status"] = "done"
-            job_store[job_id]["result"] = result["s3_url"]  # Use S3 URL instead of local path
+            job_store[job_id]["result"] = result[
+                "s3_url"
+            ]  # Use S3 URL instead of local path
             save_job_store(job_store)
         except Exception as e:
             job_store = load_job_store()

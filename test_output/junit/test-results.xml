@@ -1,1 +1,25 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="59.496" timestamp="2025-07-18T15:07:40.417921+07:00" hostname="LAPTOP-4AE66L14"><testcase classname="test.e2e.test_e2e_pytest" name="test_e2e_video_creation_with_auto_server" time="59.466" /></testsuite></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="3.496" timestamp="2025-07-19T11:22:25.610935+07:00" hostname="LAPTOP-4AE66L14"><testcase classname="" name="tests.unit.services.processors.validation.test_chained_validator" time="0.000"><error message="collection failure">ImportError while importing test module 'C:\Workspace\video-create\tests\unit\services\processors\validation\test_chained_validator.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+.venv\Lib\site-packages\_pytest\python.py:498: in importtestmodule
+    mod = import_path(
+.venv\Lib\site-packages\_pytest\pathlib.py:587: in import_path
+    importlib.import_module(module_name)
+C:\Users\min\AppData\Local\Programs\Python\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;frozen importlib._bootstrap&gt;:1387: in _gcd_import
+    ???
+&lt;frozen importlib._bootstrap&gt;:1360: in _find_and_load
+    ???
+&lt;frozen importlib._bootstrap&gt;:1331: in _find_and_load_unlocked
+    ???
+&lt;frozen importlib._bootstrap&gt;:935: in _load_unlocked
+    ???
+.venv\Lib\site-packages\_pytest\assertion\rewrite.py:186: in exec_module
+    exec(co, module.__dict__)
+tests\unit\services\processors\validation\test_chained_validator.py:8: in &lt;module&gt;
+    from app.services.processors.core.base_processor import ValidationResult
+app\services\processors\__init__.py:22: in &lt;module&gt;
+    from .media.video.processor import VideoProcessor
+E   ModuleNotFoundError: No module named 'app.services.processors.media.video.processor'</error></testcase></testsuite></testsuites>

@@ -15,7 +15,7 @@ import aiofiles
 import aiohttp
 
 from app.core.exceptions import VideoCreationError
-from app.services.interfaces import IDownloader
+from app.interfaces import IDownloader
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)

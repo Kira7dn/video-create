@@ -4,20 +4,20 @@ ImageAutoProcessor: Kiểm tra và tự động thay thế ảnh cho segment n�
 - Nếu ảnh không phù hợp, tự động tìm kiếm ảnh mới (Pixabay API với AI-enhanced keywords).
 """
 
-from typing import List, Dict, Any, Optional
-from app.services.processors.base_processor import BaseProcessor, ProcessingStage
-from app.core.exceptions import ProcessingError
-from app.config.settings import settings
-from utils.image_utils import is_image_size_valid, search_pixabay_image
-import asyncio
 import logging
 import os
-import requests
 import shutil
 from uuid import uuid4
+from typing import List, Any, Optional
+import asyncio
+import requests
 from pydantic import BaseModel, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
+from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
+from app.core.exceptions import ProcessingError
+from app.config.settings import settings
+from utils.image_utils import is_image_size_valid, search_pixabay_image
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class KeywordExtractionResult(BaseModel):
         return v or "abstract concept"
 
 
-class ImageAutoProcessor(BaseProcessor):
+class ImageProcessor(BaseProcessor):
     """
     AI-powered image validation and replacement processor using PydanticAI.
     """
@@ -92,8 +92,8 @@ class ImageAutoProcessor(BaseProcessor):
                         """,
                 )
                 logger.info("🤖 PydanticAI Agent initialized successfully")
-            except Exception as e:
-                logger.warning(f"Failed to initialize PydanticAI Agent: {e}")
+            except (ImportError, ValueError, RuntimeError) as e:
+                logger.warning("Failed to initialize PydanticAI Agent: %s", str(e))
                 self.keyword_agent = None
         else:
             self.keyword_agent = None
@@ -113,7 +113,10 @@ class ImageAutoProcessor(BaseProcessor):
         # Chuẩn bị prompt cho PydanticAI Agent
         fields = fields or []
         fields_str = ", ".join(fields)
-        user_prompt = f"Extract image search keywords from this content: '{content}' with these related fields: [{fields_str}]"
+        user_prompt = (
+            f"Extract image search keywords from this content: '{content}' "
+            f"with these related fields: [{fields_str}]"
+        )
 
         try:
             # Sử dụng PydanticAI Agent để extract keywords với structured output
@@ -130,13 +133,17 @@ class ImageAutoProcessor(BaseProcessor):
             ]
 
             logger.info(
-                f"🤖 PydanticAI extracted keywords: {final_keywords} (primary: {keyword_result.primary_keyword}) from content: '{content}' with fields: {fields}"
+                "🤖 PydanticAI extracted keywords: %s (primary: %s) from content: '%s' with fields: %s",
+                final_keywords,
+                keyword_result.primary_keyword,
+                content,
+                fields,
             )
 
             return final_keywords
 
-        except Exception as e:
-            logger.warning(f"PydanticAI keyword extraction failed: {e}")
+        except (ValueError, TypeError, RuntimeError) as e:
+            logger.warning("PydanticAI keyword extraction failed: %s", str(e))
             # Fallback về trích xuất đơn giản
             return [content.strip() or "nature"]
 
@@ -162,7 +169,9 @@ class ImageAutoProcessor(BaseProcessor):
             url = search_pixabay_image(keywords, pixabay_key, min_width, min_height)
             if url:
                 logger.info(
-                    f"✅ Found image with keywords: '{keywords}' for content: '{content}'"
+                    "✅ Found image with keywords: %s for content: '%s'",
+                    keywords,
+                    content,
                 )
                 return url
 
@@ -171,7 +180,7 @@ class ImageAutoProcessor(BaseProcessor):
             "abstract background", pixabay_key, min_width, min_height
         )
         if fallback_url:
-            logger.warning(f"⚠️ Using fallback image for content: '{content}'")
+            logger.warning("⚠️ Using fallback image for content: '%s'", content)
 
         return fallback_url
 
@@ -196,7 +205,7 @@ class ImageAutoProcessor(BaseProcessor):
                 raise ProcessingError("Context is required for ImageAutoProcessor")
             if not download_results or len(download_results) != 2:
                 raise ProcessingError("Invalid download results format")
-            segment_results, background_music_result = download_results
+            segment_results, _ = download_results
             # Check segment count matches asset count
             context_segments = context.get("segments")
             keywords = context.get("keywords")
@@ -204,7 +213,8 @@ class ImageAutoProcessor(BaseProcessor):
                 context_segments
             ):
                 raise ProcessingError(
-                    f"Segment count mismatch: {len(segment_results)} results vs {len(context_segments)} context segments"
+                    f"Segment count mismatch: {len(segment_results)} results vs "
+                    f"{len(context_segments)} context segments"
                 )
             min_width = settings.video_min_image_width
             min_height = settings.video_min_image_height
@@ -242,7 +252,8 @@ class ImageAutoProcessor(BaseProcessor):
                     )
                     if not new_url:
                         raise ProcessingError(
-                            f"Không tìm được ảnh phù hợp cho content: '{content}' với fields: {fields}"
+                            f"Không tìm được ảnh phù hợp cho content: '{content}' "
+                            f"với fields: {fields}"
                         )
                     # Download ảnh mới về temp_dir
                     ext = os.path.splitext(new_url)[1] or ".jpg"
@@ -252,13 +263,15 @@ class ImageAutoProcessor(BaseProcessor):
                         # Run blocking I/O in a thread
                         loop = asyncio.get_event_loop()
 
-                        def download_image():
-                            with requests.get(new_url, stream=True, timeout=10) as r:
+                        def download_image(url, path):
+                            with requests.get(url, stream=True, timeout=10) as r:
                                 r.raise_for_status()
-                                with open(new_path, "wb") as f:
+                                with open(path, "wb") as f:
                                     shutil.copyfileobj(r.raw, f)
 
-                        await loop.run_in_executor(None, download_image)
+                        await loop.run_in_executor(
+                            None, download_image, new_url, new_path
+                        )
 
                         # Cập nhật merged_asset với url và local_path mới
                         if "image" in merged_asset and isinstance(
@@ -271,8 +284,10 @@ class ImageAutoProcessor(BaseProcessor):
                                 "url": new_url,
                                 "local_path": new_path,
                             }
-                    except Exception as e:
-                        raise ProcessingError(f"Download replacement image failed: {e}")
+                    except (requests.RequestException, OSError) as e:
+                        raise ProcessingError(
+                            f"Download replacement image failed: {e}"
+                        ) from e
                 new_segment_results.append(merged_asset)
             self._end_processing(
                 metric, success=True, items_processed=len(new_segment_results)

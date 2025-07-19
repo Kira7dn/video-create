@@ -7,9 +7,11 @@ import gc
 import time
 import logging
 import shutil
+import uuid
+import asyncio
 import threading
 from contextlib import contextmanager, asynccontextmanager
-from typing import List, Optional, Union, AsyncIterator
+from typing import List, Optional, AsyncIterator
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -27,9 +29,13 @@ class ResourceManager:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    logger.debug(f"✅ Removed file: {file_path}")
-            except Exception as e:
-                logger.warning(f"Failed to remove file {file_path}: {e}")
+                    logger.debug("✅ Removed file: %s", file_path)
+            except (OSError, PermissionError) as e:
+                logger.warning(
+                    "Failed to remove file %s: %s. Scheduling delayed cleanup.",
+                    file_path,
+                    str(e),
+                )
                 # Schedule delayed cleanup
                 self._schedule_delayed_cleanup(file_path)
         self.tracked_files.clear()
@@ -54,16 +60,16 @@ class ResourceManager:
                 if os.path.exists(path):
                     if os.path.isfile(path):
                         os.remove(path)
-                        logger.info(f"🕒 Delayed cleanup: Removed file {path}")
+                        logger.info("🕒 Delayed cleanup: Removed file %s", path)
                     elif os.path.isdir(path):
                         shutil.rmtree(path, ignore_errors=True)
-                        logger.info(f"🕒 Delayed cleanup: Removed directory {path}")
-            except Exception as e:
-                logger.warning(f"🕒 Delayed cleanup failed for {path}: {e}")
+                        logger.info("🕒 Delayed cleanup: Removed directory %s", path)
+            except (OSError, PermissionError, shutil.Error) as e:
+                logger.warning("🕒 Delayed cleanup failed for %s: %s", path, str(e))
 
         cleanup_thread = threading.Thread(target=delayed_cleanup, daemon=True)
         cleanup_thread.start()
-        logger.info(f"🕒 Scheduled delayed cleanup for {path} in {delay_seconds}s")
+        logger.info("🕒 Scheduled delayed cleanup for %s in %ss", path, delay_seconds)
 
 
 @contextmanager
@@ -79,8 +85,6 @@ def managed_resources():
 @asynccontextmanager
 async def managed_temp_directory(prefix: Optional[str] = None) -> AsyncIterator[str]:
     """Async context manager for temporary directory with automatic cleanup"""
-    import tempfile
-    import uuid
 
     if prefix is None:
         prefix = os.path.join("data", settings.temp_dir_prefix)
@@ -96,7 +100,6 @@ async def managed_temp_directory(prefix: Optional[str] = None) -> AsyncIterator[
 
 async def _cleanup_temp_directory_async(temp_dir: str):
     """Async cleanup for temporary directories with retries"""
-    import asyncio
 
     try:
         if not os.path.exists(temp_dir):
@@ -109,10 +112,10 @@ async def _cleanup_temp_directory_async(temp_dir: str):
 
         # Non-Windows systems
         shutil.rmtree(temp_dir, ignore_errors=True)
-        logger.info(f"✅ Cleaned up temporary directory: {temp_dir}")
+        logger.info("✅ Cleaned up temporary directory: %s", temp_dir)
 
-    except Exception as e:
-        logger.warning(f"❌ Failed to clean up temp directory {temp_dir}: {e}")
+    except (OSError, PermissionError, shutil.Error) as e:
+        logger.warning("❌ Failed to clean up temp directory %s: %s", temp_dir, str(e))
 
 
 def cleanup_old_temp_directories(
@@ -136,19 +139,22 @@ def cleanup_old_temp_directories(
 
                     if age_seconds > max_age_seconds:
                         logger.info(
-                            f"🧹 Cleaning up old temp directory: {item} (age: {age_seconds/3600:.1f}h)"
+                            "🧹 Cleaning up old temp directory: %s (age: %.1fh)",
+                            item,
+                            age_seconds / 3600,
                         )
                         shutil.rmtree(item, ignore_errors=True)
                         if not os.path.exists(item):
                             logger.info(
-                                f"✅ Successfully removed old temp directory: {item}"
+                                "✅ Successfully removed old temp directory: %s", item
                             )
                         else:
                             ResourceManager()._schedule_delayed_cleanup(
                                 item, delay_seconds=60.0
                             )
-                except Exception as e:
-                    logger.warning(f"Failed to process temp directory {item}: {e}")
-    except Exception as e:
-        logger.warning(f"Failed to cleanup old temp directories: {e}")
-
+                except (OSError, PermissionError, shutil.Error) as e:
+                    logger.warning(
+                        "Failed to process temp directory %s: %s", item, str(e)
+                    )
+    except (OSError, PermissionError) as e:
+        logger.warning("Failed to cleanup old temp directories: %s", str(e))

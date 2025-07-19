@@ -15,12 +15,11 @@ from typing import Any, Dict
 
 from app.config import settings
 from app.core.exceptions import ProcessingError, VideoCreationError
-from app.services.processors.audio_processor import AudioProcessor
-from app.services.processors.base_processor import ProcessingStage
-from app.services.processors.text_overlay_processor import TextOverlayProcessor
-from app.services.processors.transition_processor import TransitionProcessor
-from app.services.processors.base_processor import BaseProcessor
-from app.services.processors.interfaces import ISegmentProcessor
+from app.interfaces import IAudioProcessor, ISegmentProcessor
+from app.services.processors.media.audio.processor import AudioProcessor
+from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
+from app.services.processors.text.overlay import TextOverlayProcessor
+from app.services.processors.media.video.transitions import TransitionProcessor
 from utils.subprocess_utils import safe_subprocess_run
 from utils.image_utils import process_image
 
@@ -30,14 +29,21 @@ logger = logging.getLogger(__name__)
 class SegmentProcessor(BaseProcessor, ISegmentProcessor):
     """Handles creation of a single video segment clip from a segment dict"""
 
-    def __init__(self, metrics_collector=None):
+    def __init__(self, metrics_collector=None, audio_processor: IAudioProcessor = None):
+        """Initialize the SegmentProcessor.
+
+        Args:
+            metrics_collector: Optional metrics collector instance
+            audio_processor: Audio processor instance (defaults to AudioProcessor)
+        """
         super().__init__(metrics_collector)
-        # AudioProcessor is a static class and doesn't need metrics_collector
-        self.audio_processor = AudioProcessor
+        self.audio_processor = audio_processor or AudioProcessor()
         self.text_processor = TextOverlayProcessor()
         self.transition_processor = TransitionProcessor()
 
-    async def _process_async(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def _process_async(
+        self, input_data: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
         """Process input data asynchronously by delegating to process_segment.
 
         This method implements the abstract method from BaseProcessor.
@@ -50,19 +56,19 @@ class SegmentProcessor(BaseProcessor, ISegmentProcessor):
             Dictionary containing processing results
         """
         return await self.process_segment(input_data, **kwargs)
-        
+
     async def process(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Process input data by delegating to _process_async.
-        
+
         This method is maintained for backward compatibility.
-        
+
         Args:
             input_data: Dictionary containing segment information
             **kwargs: Additional processing parameters
-            
+
         Returns:
             Dictionary containing processing results
-            
+
         Raises:
             ProcessingError: If processing fails
         """
@@ -99,7 +105,7 @@ class SegmentProcessor(BaseProcessor, ISegmentProcessor):
             error_msg = (
                 f"Failed to process segment {segment.get('id', 'unknown')}: {str(e)}"
             )
-            if 'metric' in locals():
+            if "metric" in locals():
                 self._end_processing(
                     metric, success=False, error_message=error_msg, items_processed=0
                 )

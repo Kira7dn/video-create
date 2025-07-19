@@ -1,9 +1,11 @@
 import logging
 
+from app.services.processors.core.base_processor import BaseProcessor
+
 logger = logging.getLogger(__name__)
 
 
-class TransitionProcessor:
+class VideoProcessor(BaseProcessor):
     """Handles transition filter logic for video and audio"""
 
     @staticmethod

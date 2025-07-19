@@ -57,10 +57,15 @@ class PerformanceMonitor:
             metrics = self.metrics[operation_name]
 
             if success:
-                logger.info("✅ %s completed in %.2fs", operation_name, metrics.duration)
+                logger.info(
+                    "✅ %s completed in %.2fs", operation_name, metrics.duration
+                )
             else:
                 logger.error(
-                    "❌ %s failed after %.2fs: %s", operation_name, metrics.duration, error
+                    "❌ %s failed after %.2fs: %s",
+                    operation_name,
+                    metrics.duration,
+                    error,
                 )
 
     def get_summary(self) -> Dict[str, Any]:
@@ -209,7 +214,10 @@ def retry_with_backoff(
                     if attempt < max_retries:
                         delay = min(base_delay * (2**attempt), max_delay)
                         logger.warning(
-                            "Attempt %d failed, retrying in %.1fs: %s", attempt + 1, delay, e
+                            "Attempt %d failed, retrying in %.1fs: %s",
+                            attempt + 1,
+                            delay,
+                            e,
                         )
                         await asyncio.sleep(delay)
                     else:

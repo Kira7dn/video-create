@@ -8,7 +8,7 @@ from typing import List, Dict, Optional, Any
 import asyncio
 
 from app.core.exceptions import ProcessingError
-from app.services.processors.base_processor import (
+from app.services.processors.core.base_processor import (
     BaseProcessor,
     ProcessingStage,
 )

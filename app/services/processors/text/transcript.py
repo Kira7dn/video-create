@@ -24,7 +24,7 @@ from pydantic import BaseModel, field_validator
 # Local application imports
 from app.config import settings
 from app.core.exceptions import ProcessingError
-from app.services.processors.base_processor import BaseProcessor, ProcessingStage
+from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
 from utils.gentle_utils import align_audio_with_transcript, filter_successful_words
 
 
