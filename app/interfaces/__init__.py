@@ -4,18 +4,26 @@ Interfaces package for the application.
 This package contains all the interface definitions used across the application.
 """
 
-from .video import IVideoProcessor, ISegmentProcessor
+from .audio import IAudioProcessor
+from .metrics import IMetricsCollector
+from .pipeline import IPipeline
+from .pipeline_context import IPipelineContext
+from .pipeline_stage import IPipelineStage
 from .storage import IDownloader, IUploader
 from .validation import IValidator
-from .metrics import IMetricsCollector
-from .audio import IAudioProcessor
+from .video import IVideoProcessor, ISegmentProcessor
 
 __all__ = [
-    'IVideoProcessor',
-    'ISegmentProcessor',
-    'IDownloader',
-    'IUploader',
-    'IValidator',
-    'IMetricsCollector',
-    'IAudioProcessor',
+    # Pipeline interfaces
+    "IPipeline",
+    "IPipelineContext",
+    "IPipelineStage",
+    # Other interfaces
+    "IAudioProcessor",
+    "IDownloader",
+    "IUploader",
+    "IValidator",
+    "IMetricsCollector",
+    "IVideoProcessor",
+    "ISegmentProcessor",
 ]

@@ -75,13 +75,16 @@ result/
 *.mkv
 
 # Development and documentation files
-.roomodes
-.windsurfrules
+.roomodes/
+.github/
+.windsurf/
+.windsurfrules/
 .taskmaster/
 .cursor/
 .roo/
 *MIGRATION*.md
 *AUDIO_MIGRATION*.md
+.pytest_cache/
 
 # Sample and example files
 input_sample*.json

@@ -21,7 +21,7 @@ from app.core.exceptions import (
     VideoCreationError,
 )
 from app.services.pipelines import create_video_creation_pipeline
-from app.services.pipelines.pipeline import PipelineContext
+from app.services.pipelines.context.default import PipelineContext
 from app.services.processors.core.base_processor import MetricsCollector
 from utils.resource_manager import (
     cleanup_old_temp_directories,

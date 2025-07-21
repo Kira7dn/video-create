@@ -5,10 +5,10 @@ This module contains processors that coordinate the execution of other processor
 to implement complete video processing workflows.
 """
 
-from .segment import SegmentProcessor
+from .segment_processor import SegmentProcessor
 from .composer import ConcatenationProcessor
 
 __all__ = [
-    'SegmentProcessor',
-    'ConcatenationProcessor',
+    "SegmentProcessor",
+    "ConcatenationProcessor",
 ]

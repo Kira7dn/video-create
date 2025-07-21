@@ -22,8 +22,20 @@ class BasicValidator(IValidator[Dict[str, Any]]):
     - Each segment has an 'id' field
     """
 
+    async def validate_async(self, data: Any) -> ValidationResult[Dict[str, Any]]:
+        """Asynchronously validate the input data structure.
+
+        Args:
+            data: The input data to validate
+
+        Returns:
+            ValidationResult with validation status and any errors
+        """
+        # Gọi phương thức validate đồng bộ
+        return self.validate(data)
+
     def validate(self, data: Any) -> ValidationResult[Dict[str, Any]]:
-        """Validate the input data structure.
+        """Synchronously validate the input data structure.
 
         Args:
             data: The input data to validate

@@ -5,9 +5,9 @@ Module chứa logic xây dựng và quản lý video creation pipeline.
 import importlib
 from typing import Any, Dict, Optional
 
-from app.services.processors.base_processor import MetricsCollector
+from app.services.processors.core.base_processor import MetricsCollector
 
-from .pipeline import VideoPipeline
+from .video_pipeline import VideoPipeline
 from .pipeline_config import get_video_creation_stages
 
 

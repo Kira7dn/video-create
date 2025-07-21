@@ -24,7 +24,7 @@ from pydantic import BaseModel, field_validator
 # Local application imports
 from app.config import settings
 from app.core.exceptions import ProcessingError
-from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
+from app.services.processors.core.base_processor import AsyncProcessor, ProcessingStage
 from utils.gentle_utils import align_audio_with_transcript, filter_successful_words
 
 
@@ -122,7 +122,7 @@ class WordGroupMapping(BaseModel):
     ]  # [{"segment_index": 0, "start_word": 0, "end_word": 2}, ...]
 
 
-class TranscriptProcessor(BaseProcessor):
+class TranscriptProcessor(AsyncProcessor):
     """
     Xử lý transcript và tạo text overlay với timing chính xác.
 

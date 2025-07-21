@@ -2,6 +2,7 @@
 Application configuration using Pydantic Settings
 """
 
+import os
 from typing import List, Union
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -37,6 +38,10 @@ class Settings(BaseSettings):
     cors_allow_credentials: bool = True
     cors_allow_methods: list = ["GET", "POST"]
     cors_allow_headers: list = ["*"]
+
+    # Schema Validation Settings
+    schema_path: str = "app/config/schema.json"
+    input_sample_path: str = "app/config/input_sample.json"
 
     @field_validator("cors_origins")
     @classmethod
@@ -162,7 +167,7 @@ class Settings(BaseSettings):
 
     @property
     def gentle_url(self) -> str:
-        import os
+
         # Ưu tiên biến môi trường
         if os.getenv("GENTLE_URL"):
             return os.getenv("GENTLE_URL")
@@ -171,7 +176,6 @@ class Settings(BaseSettings):
             return "http://gentle:8765/transcriptions"
         # Mặc định local
         return "http://localhost:8765/transcriptions"
-
 
     model_config = {
         "env_file": ".env",

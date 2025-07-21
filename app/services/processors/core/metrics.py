@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 class ProcessingStage(Enum):
     """Enumeration of processing stages"""
 
+    # Generic processing stage
+    PROCESSING = "processing"
+
+    # Specific processing stages
     VALIDATION = "validation"
     DOWNLOAD = "download"
     AUDIO_PROCESSING = "audio_processing"

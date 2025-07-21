@@ -15,16 +15,27 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union, cast
 
 from app.core.exceptions import ProcessingError
-from app.services.processors.core.base_processor import BaseProcessor, Validator
+from app.interfaces import (
+    IPipeline,
+    IPipelineContext,
+    IPipelineStage,
+    PipelineStageStatus,
+)
+from app.services.processors.core.base_processor import AsyncProcessor, SyncProcessor
 from app.services.processors.core.metrics import MetricsCollector
-from app.services.processors.validation.core.base_validator import PydanticAIValidator
 
 logger = logging.getLogger(__name__)
+
+# Define type variables for better type hints
+T = TypeVar("T")
+ContextT = TypeVar("ContextT", bound=IPipelineContext)
+StageT = TypeVar("StageT", bound=IPipelineStage)
 
 
 class PipelineStageStatus(Enum):
@@ -38,189 +49,438 @@ class PipelineStageStatus(Enum):
 
 
 @dataclass
-class PipelineContext:
-    """Context object passed through pipeline stages"""
+class PipelineContext(IPipelineContext):
+    """
+    Implementation of IPipelineContext that carries data between pipeline stages.
+    """
 
-    data: Dict[str, Any]
-    temp_dir: str
-    video_id: str
-    metadata: Dict[str, Any]
+    _data: Dict[str, Any] = field(default_factory=dict)
+    _temp_dir: Optional[Path] = None
+    _video_id: Optional[str] = None
+    _metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def data(self) -> Dict[str, Any]:
+        """Get the context data dictionary"""
+        return self._data
+
+    @data.setter
+    def data(self, value: Dict[str, Any]) -> None:
+        """Set the context data dictionary"""
+        self._data = value or {}
+
+    @property
+    def temp_dir(self) -> Optional[Path]:
+        """Get the temporary directory path"""
+        return self._temp_dir
+
+    @temp_dir.setter
+    def temp_dir(self, value: Optional[Union[str, Path]]) -> None:
+        """Set the temporary directory path"""
+        self._temp_dir = Path(value) if value else None
+
+    @property
+    def video_id(self) -> Optional[str]:
+        """Get the video ID"""
+        return self._video_id
+
+    @video_id.setter
+    def video_id(self, value: Optional[str]) -> None:
+        """Set the video ID"""
+        self._video_id = value
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get the metadata dictionary"""
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: Dict[str, Any]) -> None:
+        """Set the metadata dictionary"""
+        self._metadata = value or {}
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Get value from context data"""
-        return self.data.get(key, default)
+        """
+        Get a value from the context data
+
+        Args:
+            key: The key to look up
+            default: Default value if key is not found
+
+        Returns:
+            The value associated with the key, or default if key doesn't exist
+        """
+        return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
-        """Set value in context data"""
-        self.data[key] = value
+        """
+        Set a value in the context data
+
+        Args:
+            key: The key to set
+            value: The value to store
+        """
+        self._data[key] = value
 
     def update(self, updates: Dict[str, Any]) -> None:
-        """Update context data with multiple values"""
-        self.data.update(updates)
+        """
+        Update multiple values in the context data
+
+        Args:
+            updates: Dictionary of updates to apply
+        """
+        self._data.update(updates)
 
 
-class PipelineStage(ABC):
-    """Abstract base class for pipeline stages"""
+class PipelineStage(IPipelineStage, ABC):
+    """
+    Base implementation of IPipelineStage that can be used directly or subclassed.
+    """
 
     def __init__(self, name: str, required_inputs: Optional[List[str]] = None):
-        self.name = name
-        self.required_inputs = required_inputs or []
-        self.status = PipelineStageStatus.PENDING
+        """
+        Initialize a new pipeline stage.
+
+        Args:
+            name: The name of the stage (must be unique within the pipeline)
+            required_inputs: List of input keys required by this stage
+        """
+        self._name = name
+        self._required_inputs = required_inputs or []
+        self._status = PipelineStageStatus.PENDING
         self.logger = logging.getLogger(f"Pipeline.{name}")
 
-    @abstractmethod
-    async def execute(self, context: PipelineContext) -> PipelineContext:
-        """Execute this pipeline stage"""
+    @property
+    def name(self) -> str:
+        """
+        Get the name of the stage.
 
-    def validate_inputs(self, context: PipelineContext) -> None:
-        """Validate required inputs are present in context"""
-        missing_inputs = []
-        for required_input in self.required_inputs:
-            if required_input not in context.data:
-                missing_inputs.append(required_input)
+        Returns:
+            str: The name of the stage
+        """
+        return self._name
 
-        if missing_inputs:
-            raise ProcessingError(
-                f"Stage '{self.name}' missing required inputs: {', '.join(missing_inputs)}"
-            )
+    @property
+    def status(self) -> PipelineStageStatus:
+        """
+        Get the current status of the stage.
 
-    def can_skip(self, _context: PipelineContext) -> bool:
-        """Determine if this stage can be skipped"""
+        Returns:
+            PipelineStageStatus: The current status
+        """
+        return self._status
+
+    @status.setter
+    def status(self, value: PipelineStageStatus) -> None:
+        """
+        Set the status of the stage.
+
+        Args:
+            value: The new status
+        """
+        self._status = value
+        self.logger.debug(f"Stage status changed to {value}")
+
+    @property
+    def required_inputs(self) -> List[str]:
+        """
+        Get the list of required input keys.
+
+        Returns:
+            List[str]: List of required input keys
+        """
+        return self._required_inputs
+
+    async def execute(self, context: IPipelineContext) -> IPipelineContext:
+        """
+        Execute the stage with the given context.
+
+        This method handles common execution logic like status updates and error handling.
+        Subclasses should implement _execute_impl() for stage-specific logic.
+
+        Args:
+            context: The pipeline context containing input data
+
+        Returns:
+            Updated pipeline context with stage results
+
+        Raises:
+            ProcessingError: If the stage fails to execute
+        """
+        self.status = PipelineStageStatus.RUNNING
+        self.logger.info(f"Starting execution of stage: {self.name}")
+
+        try:
+            # Validate inputs before execution
+            if not self.validate_inputs(context):
+                missing = [i for i in self.required_inputs if i not in context.data]
+                raise ProcessingError(f"Missing required inputs: {missing}")
+
+            # Execute the stage implementation
+            result = await self._execute_impl(context)
+            self.status = PipelineStageStatus.COMPLETED
+            self.logger.info(f"Completed stage: {self.name}")
+            return result
+
+        except Exception as e:
+            self.status = PipelineStageStatus.FAILED
+            error_msg = f"Stage '{self.name}' failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            raise ProcessingError(error_msg) from e
+
+    def validate_inputs(self, context: IPipelineContext) -> bool:
+        """
+        Validate that all required inputs are present in the context.
+
+        Args:
+            context: The pipeline context to validate
+
+        Returns:
+            bool: True if all required inputs are present, False otherwise
+
+        Note:
+            This is called automatically by execute() before _execute_impl()
+        """
+        if not self.required_inputs:
+            return True
+        return all(key in context.data for key in self.required_inputs)
+
+    def can_skip(self, context: IPipelineContext) -> bool:
+        """
+        Check if this stage can be skipped based on the current context.
+
+        Args:
+            context: The pipeline context to check
+
+        Returns:
+            bool: True if the stage can be skipped, False otherwise
+
+        Note:
+            Override this in subclasses to implement custom skip logic.
+            The default implementation always returns False.
+        """
         return False
+
+    @abstractmethod
+    async def _execute_impl(self, context: IPipelineContext) -> IPipelineContext:
+        """
+        Implementation of stage execution.
+
+        Subclasses must override this method to provide stage-specific logic.
+
+        Args:
+            context: The pipeline context containing input data
+
+        Returns:
+            Updated pipeline context with stage results
+
+        Raises:
+            Exception: If the stage encounters an error
+        """
+        pass
 
 
 class ProcessorPipelineStage(PipelineStage):
-    """Pipeline stage that wraps a processor"""
+    """
+    Pipeline stage that wraps a processor (synchronous or asynchronous).
+
+    This stage executes a processor with input from the context and stores
+    the result back into the context at the specified output key.
+    """
 
     def __init__(
         self,
         name: str,
-        processor: BaseProcessor,
+        processor: Union[SyncProcessor, AsyncProcessor],
         input_key: str,
         output_key: str,
         required_inputs: Optional[List[str]] = None,
     ):
-        super().__init__(name, required_inputs)
+        """
+        Initialize a processor pipeline stage.
+
+        Args:
+            name: A descriptive name for this stage
+            processor: The processor to execute (can be sync or async)
+            input_key: Key to retrieve input data from the context
+            output_key: Key to store the processor's output in the context
+            required_inputs: Additional required input keys beyond the input_key
+        """
+        # Include input_key in required_inputs if not already present
+        all_required = [input_key] + (required_inputs or [])
+        super().__init__(name, list(dict.fromkeys(all_required)))  # Remove duplicates
+
         self.processor = processor
         self.input_key = input_key
         self.output_key = output_key
 
-    async def execute(self, context: PipelineContext) -> PipelineContext:
-        """Execute processor and store result in context"""
-        self.validate_inputs(context)
+        # Log processor type for debugging
+        is_async = asyncio.iscoroutinefunction(processor.process)
+        self.logger.debug(
+            f"Initialized {'async' if is_async else 'sync'} processor stage"
+        )
 
+    async def _execute_impl(self, context: IPipelineContext) -> IPipelineContext:
+        """
+        Execute the processor with input from context and store the result.
+
+        Args:
+            context: The pipeline context containing input data
+
+        Returns:
+            Updated pipeline context with processor output
+
+        Raises:
+            ProcessingError: If processor execution fails or input is invalid
+        """
+        self.logger.debug(f"Executing processor with input key: {self.input_key}")
+
+        # Get input data from context
         input_data = context.get(self.input_key)
         if input_data is None:
             raise ProcessingError(f"No input data found for key '{self.input_key}'")
 
-        # Execute processor (handle both sync and async)
-        kwargs: Dict[str, Any] = {"context": context}
+        try:
+            # Prepare processor arguments
+            kwargs: Dict[str, Any] = {"context": context}
 
-        if asyncio.iscoroutinefunction(self.processor.process):
-            result = await self.processor.process(input_data, **kwargs)
-        else:
-            result = self.processor.process(input_data, **kwargs)
+            # Log input data type for debugging
+            self.logger.debug(f"Input data type: {type(input_data).__name__}")
 
-        # If processor is a Validator, handle validation result
-        if isinstance(self.processor, Validator):
-            if not result.is_valid:
-                # For AI validators, fallback to original data with warning
-                if isinstance(self.processor, PydanticAIValidator):
-                    self.logger.warning(
-                        "AI validation failed, using original data: %s",
-                        "; ".join(result.errors),
-                    )
-                    context.set(
-                        self.output_key, input_data
-                    )  # Fallback to original input
-                else:
-                    # For critical validators, fail the pipeline
-                    raise ProcessingError(
-                        f"Validation failed: {'; '.join(result.errors)}"
-                    )
+            # Execute processor (handles both sync and async processors)
+            if asyncio.iscoroutinefunction(self.processor.process):
+                self.logger.debug("Executing async processor")
+                result = await self.processor.process(input_data, **kwargs)
             else:
-                # Validation succeeded, use validated data if available
-                validated_data = (
-                    result.validated_data
-                    if result.validated_data is not None
-                    else input_data
-                )
-                context.set(self.output_key, validated_data)
-        else:
-            context.set(self.output_key, result)
+                self.logger.debug("Executing sync processor")
+                result = self.processor.process(input_data, **kwargs)
 
-        return context
+                # If the processor returns a coroutine, await it
+                if asyncio.iscoroutine(result):
+                    self.logger.debug("Processor returned a coroutine, awaiting...")
+                    result = await result
+
+            # Store result in context
+            if result is not None:  # Only store non-None results
+                context.set(self.output_key, result)
+                self.logger.debug(f"Stored result at key: {self.output_key}")
+            else:
+                self.logger.warning("Processor returned None, no result stored")
+
+            return context
+
+        except Exception as e:
+            error_msg = f"Processor '{self.name}' failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            raise ProcessingError(error_msg) from e
 
 
 class FunctionPipelineStage(PipelineStage):
-    """Pipeline stage that wraps a function"""
+    """
+    Pipeline stage that wraps a function.
+
+    This stage executes a function with the pipeline context and optionally
+    stores the result back into the context at the specified output key.
+    """
 
     def __init__(
         self,
         name: str,
-        func: Optional[Callable[[PipelineContext], Any]] = None,
+        func: Optional[Callable[[IPipelineContext], Any]] = None,
         func_name: Optional[str] = None,
         output_key: Optional[str] = None,
         required_inputs: Optional[List[str]] = None,
     ):
-        super().__init__(name, required_inputs)
+        """
+        Initialize a function pipeline stage.
+
+        Args:
+            name: A descriptive name for this stage
+            func: The function to execute (can be sync or async)
+            func_name: Name of the function (for debugging)
+            output_key: If provided, store the function's return value in the context with this key
+            required_inputs: List of input keys required by this stage
+        """
+        super().__init__(name, required_inputs or [])
         self.func = func
-        self.func_name = func_name  # Tên function để bind sau
+        self.func_name = func_name or (func.__name__ if func else None)
         self.output_key = output_key
 
-    async def execute(self, context: PipelineContext) -> PipelineContext:
+        # Log function type for debugging
+        is_async = func and asyncio.iscoroutinefunction(func)
+        self.logger.debug(
+            f"Initialized {'async' if is_async else 'sync'} function stage"
+        )
+
+    async def _execute_impl(self, context: IPipelineContext) -> IPipelineContext:
         """
-        Execute function and optionally store result in context
+        Execute the function with the pipeline context.
+
+        Args:
+            context: The pipeline context
+
+        Returns:
+            Updated pipeline context with function result (if output_key is set)
 
         Raises:
-            ProcessingError: Nếu function chưa được bind hoặc có lỗi khi thực thi
+            ProcessingError: If function is not set or execution fails
         """
         if self.func is None:
-            raise ProcessingError(
-                f"Function for stage '{self.name}' is not bound. "
-                f"Make sure to set the 'func' attribute or provide a valid function."
-            )
-
-        self.validate_inputs(context)
-        self.status = PipelineStageStatus.RUNNING
+            func_name = self.func_name or "unnamed_function"
+            raise ProcessingError(f"Function '{func_name}' is not set")
 
         try:
-            # Gọi function với context
+            # Execute the function (handles both sync and async functions)
             if asyncio.iscoroutinefunction(self.func):
+                self.logger.debug("Executing async function")
                 result = await self.func(context)
             else:
-                # Nếu function không phải coroutine, chạy trong executor
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, self.func, context)
+                self.logger.debug("Executing sync function")
+                result = self.func(context)
 
+                # If the function returns a coroutine, await it
+                if asyncio.iscoroutine(result):
+                    self.logger.debug("Function returned a coroutine, awaiting...")
+                    result = await result
+
+            # Store result in context if output_key is provided
             if self.output_key is not None:
                 context.set(self.output_key, result)
+                self.logger.debug(f"Stored function result at key: {self.output_key}")
 
-            self.status = PipelineStageStatus.COMPLETED
             return context
 
         except Exception as e:
-            self.status = PipelineStageStatus.FAILED
-            self.logger.error(
-                "Error in function stage '%s': %s", self.name, str(e), exc_info=True
+            func_name = self.func_name or (
+                self.func.__name__ if self.func else "unknown"
             )
-            raise ProcessingError(f"Error in function stage '{self.name}': {e}") from e
+            error_msg = f"Function '{func_name}' failed: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            raise ProcessingError(error_msg) from e
 
 
-class VideoPipeline:
-    """Main pipeline for video processing workflow"""
+class VideoPipeline(IPipeline):
+    """
+    Implementation of IPipeline for video processing workflow.
+    This is the main pipeline that orchestrates the execution of multiple stages.
+    """
 
     def __init__(self, metrics_collector: Optional[MetricsCollector] = None):
-        self._stages: List[PipelineStage] = []
+        self._stages: List[IPipelineStage] = []
         self.metrics_collector = metrics_collector or MetricsCollector()
         self.logger = logging.getLogger("VideoPipeline")
 
     @property
-    def stages(self) -> List[PipelineStage]:
-        """Get the list of pipeline stages"""
+    def stages(self) -> List[IPipelineStage]:
+        """
+        Get all stages in the pipeline
+
+        Returns:
+            List of pipeline stages
+        """
         return self._stages
 
-    def get_stage(self, name: str) -> Optional[PipelineStage]:
+    def get_stage(self, name: str) -> Optional[IPipelineStage]:
         """
         Get a stage by name
 
@@ -228,37 +488,56 @@ class VideoPipeline:
             name: Name of the stage to find
 
         Returns:
-            PipelineStage or None if not found
+            The stage if found, None otherwise
         """
         for stage in self._stages:
             if stage.name == name:
                 return stage
         return None
 
-    def add_stage(self, stage: PipelineStage) -> PipelineStage:
+    def add_stage(self, stage: IPipelineStage) -> "IPipeline":
         """
         Add a stage to the pipeline
 
         Args:
-            stage: Stage to add to the pipeline
+            stage: The stage to add to the pipeline
 
         Returns:
-            PipelineStage: The added stage (for method chaining)
+            Self for method chaining
+
+        Note:
+            This method allows method chaining by returning self
         """
         self._stages.append(stage)
-        return stage
+        return self
 
     def add_processor_stage(
         self,
         name: str,
-        processor: BaseProcessor,
+        processor: Union[SyncProcessor, AsyncProcessor],
         input_key: str,
         output_key: str,
         required_inputs: Optional[List[str]] = None,
-    ) -> "VideoPipeline":
-        """Add a processor stage to the pipeline"""
+    ) -> "IPipeline":
+        """
+        Add a processor stage to the pipeline
+
+        Args:
+            name: Name of the stage
+            processor: The processor to use
+            input_key: Key to get input data from context
+            output_key: Key to store output data in context
+            required_inputs: List of required input keys
+
+        Returns:
+            Self for method chaining
+        """
         stage = ProcessorPipelineStage(
-            name, processor, input_key, output_key, required_inputs
+            name=name,
+            processor=processor,
+            input_key=input_key,
+            output_key=output_key,
+            required_inputs=required_inputs,
         )
         return self.add_stage(stage)
 
@@ -269,19 +548,19 @@ class VideoPipeline:
         func_name: Optional[str] = None,
         output_key: Optional[str] = None,
         required_inputs: Optional[List[str]] = None,
-    ) -> FunctionPipelineStage:
+    ) -> "IPipeline":
         """
         Add a function stage to the pipeline
 
         Args:
-            name: Tên của stage
-            func: Hàm xử lý (có thể cung cấp sau qua thuộc tính func)
-            func_name: Tên hàm để bind sau (nếu chưa có func)
-            output_key: Khóa để lưu kết quả vào context
-            required_inputs: Danh sách các input bắt buộc
+            name: Name of the stage
+            func: Processing function (can be provided later via func attribute)
+            func_name: Function name to bind later (if func is not provided)
+            output_key: Key to store the result in context
+            required_inputs: List of required input keys
 
         Returns:
-            FunctionPipelineStage: Đối tượng stage vừa được tạo
+            Self for method chaining
         """
         stage = FunctionPipelineStage(
             name=name,
@@ -290,10 +569,9 @@ class VideoPipeline:
             output_key=output_key,
             required_inputs=required_inputs,
         )
-        self.add_stage(stage)
-        return stage
+        return self.add_stage(stage)
 
-    async def execute(self, context: PipelineContext) -> Dict[str, Any]:
+    async def execute(self, context: IPipelineContext) -> Dict[str, Any]:
         """
         Execute the pipeline with the given context
 
@@ -301,12 +579,26 @@ class VideoPipeline:
             context: The pipeline context containing data and state
 
         Returns:
-            Dict containing execution results and metrics
+            Dictionary containing execution results and metrics
+
+            Example:
+                {
+                    "success": True,
+                    "duration": 1.23,
+                    "stages": [
+                        {
+                            "name": "stage1",
+                            "status": "completed",
+                            "duration": 0.5
+                        },
+                        ...
+                    ]
+                }
 
         Raises:
-            ProcessingError: If any stage fails
+            ProcessingError: If any stage fails during execution
         """
-        results = {}
+        results: Dict[str, Any] = {}
         start_time = time.time()
 
         for stage in self._stages:
@@ -317,11 +609,15 @@ class VideoPipeline:
                 # Execute the stage
                 context = await stage.execute(context)
                 stage_duration = time.time() - stage_start
+                stage.status = PipelineStageStatus.COMPLETED
 
                 # Log success
                 self.logger.info(
                     "Completed stage %s in %.2fs", stage.name, stage_duration
                 )
+
+                # Store stage duration for metrics and reporting
+                setattr(stage, "_duration", stage_duration)
 
                 # Collect metrics
                 self.metrics_collector.record_stage(
@@ -330,6 +626,7 @@ class VideoPipeline:
 
             except Exception as e:
                 stage_duration = time.time() - stage_start
+                stage.status = PipelineStageStatus.FAILED
                 self.logger.error(
                     "Stage %s failed after %.2fs: %s",
                     stage.name,
@@ -357,8 +654,8 @@ class VideoPipeline:
                 "stages": [
                     {
                         "name": stage.name,
-                        "status": stage.status.value,
-                        "duration": getattr(stage, "duration", 0),
+                        "status": stage.status,
+                        "duration": getattr(stage, "_duration", 0.0),
                     }
                     for stage in self._stages
                 ],
@@ -372,14 +669,26 @@ class VideoPipeline:
         Get summary of all stages in the pipeline
 
         Returns:
-            List[Dict]: List of stage summaries with name, status, duration, and items_processed
+            List of dictionaries containing stage summaries with name, status,
+            duration, and items_processed for each stage in the pipeline.
+
+            Example:
+                [
+                    {
+                        "name": "stage1",
+                        "status": "completed",
+                        "duration": 0.5,
+                        "items_processed": 1
+                    },
+                    ...
+                ]
         """
         return [
             {
                 "name": stage.name,
-                "status": stage.status.value,
-                "duration": getattr(stage, "duration", 0),
-                "items_processed": getattr(stage, "items_processed", 0),
+                "status": stage.status,
+                "duration": getattr(stage, "_duration", 0.0),
+                "items_processed": getattr(stage, "_items_processed", 1),
             }
             for stage in self._stages
         ]

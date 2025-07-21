@@ -11,12 +11,12 @@ import aiohttp
 
 from app.core.exceptions import DownloadError
 from app.services.download_service import DownloadService
-from app.services.processors.core.base_processor import BaseProcessor
+from app.services.processors.core.base_processor import AsyncProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class DownloadProcessor(BaseProcessor):
+class DownloadProcessor(AsyncProcessor):
     """
     Processor for downloading assets required for video creation.
 

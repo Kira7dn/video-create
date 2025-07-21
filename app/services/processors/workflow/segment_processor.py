@@ -17,16 +17,16 @@ from app.config import settings
 from app.core.exceptions import ProcessingError, VideoCreationError
 from app.interfaces import IAudioProcessor, ISegmentProcessor
 from app.services.processors.media.audio.processor import AudioProcessor
-from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
+from app.services.processors.core.base_processor import AsyncProcessor, ProcessingStage
 from app.services.processors.text.overlay import TextOverlayProcessor
-from app.services.processors.media.video.transitions import TransitionProcessor
+from app.services.processors.media.video.processor import VideoProcessor
 from utils.subprocess_utils import safe_subprocess_run
 from utils.image_utils import process_image
 
 logger = logging.getLogger(__name__)
 
 
-class SegmentProcessor(BaseProcessor, ISegmentProcessor):
+class SegmentProcessor(AsyncProcessor, ISegmentProcessor):
     """Handles creation of a single video segment clip from a segment dict"""
 
     def __init__(self, metrics_collector=None, audio_processor: IAudioProcessor = None):
@@ -39,7 +39,7 @@ class SegmentProcessor(BaseProcessor, ISegmentProcessor):
         super().__init__(metrics_collector)
         self.audio_processor = audio_processor or AudioProcessor()
         self.text_processor = TextOverlayProcessor()
-        self.transition_processor = TransitionProcessor()
+        self.transition_processor = VideoProcessor()
 
     async def _process_async(
         self, input_data: Dict[str, Any], **kwargs

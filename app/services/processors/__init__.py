@@ -14,7 +14,11 @@ Structure:
 """
 
 # Core components
-from .core.base_processor import BaseProcessor, BaseSyncProcessor, BatchProcessor
+from .core.base_processor import (
+    ProcessorBase,
+    SyncProcessor,
+    AsyncProcessor,
+)
 from .core.metrics import MetricsCollector, ProcessingMetrics, ProcessingStage
 
 # Media processing
@@ -23,7 +27,7 @@ from .media.video.processor import VideoProcessor
 from .media.image.processor import ImageProcessor
 
 # Workflow
-from .workflow.segment import SegmentProcessor
+from .workflow.segment_processor import SegmentProcessor
 from .workflow.composer import ConcatenationProcessor
 
 # I/O
@@ -35,13 +39,13 @@ from .text.overlay import TextOverlayProcessor
 from .text.transcript import TranscriptProcessor
 
 # Validation
-from .validation.processor import create_validation_processor
+from .validation.processor import ValidationProcessor
 
 __all__ = [
-    # Core
-    "BaseProcessor",
-    "BaseSyncProcessor",
-    "BatchProcessor",
+    # Core - New classes
+    "ProcessorBase",
+    "SyncProcessor",
+    "AsyncProcessor",
     "MetricsCollector",
     "ProcessingMetrics",
     "ProcessingStage",
@@ -59,5 +63,5 @@ __all__ = [
     "TextOverlayProcessor",
     "TranscriptProcessor",
     # Validation
-    "create_validation_processor",
+    "ValidationProcessor",
 ]

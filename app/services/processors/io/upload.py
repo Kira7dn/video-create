@@ -15,7 +15,7 @@ import os
 import asyncio
 import boto3
 from app.services.processors.core.base_processor import (
-    BaseProcessor,
+    AsyncProcessor,
     ProcessingStage,
     MetricsCollector,
 )
@@ -23,7 +23,7 @@ from app.config.settings import settings
 from app.core.exceptions import ProcessingError, UploadError
 
 
-class S3UploadProcessor(BaseProcessor):
+class S3UploadProcessor(AsyncProcessor):
     """
     Processor for uploading video files to AWS S3.
 

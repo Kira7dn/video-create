@@ -9,7 +9,7 @@ import asyncio
 
 from app.core.exceptions import ProcessingError
 from app.services.processors.core.base_processor import (
-    BaseProcessor,
+    AsyncProcessor,
     ProcessingStage,
 )
 from utils.video_utils import ffmpeg_concat_videos
@@ -17,7 +17,7 @@ from utils.video_utils import ffmpeg_concat_videos
 logger = logging.getLogger(__name__)
 
 
-class ConcatenationProcessor(BaseProcessor):
+class ConcatenationProcessor(AsyncProcessor):
     """Handles video concatenation with transitions and background music"""
 
     # No need to override __init__ if just calling parent's __init__

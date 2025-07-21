@@ -136,23 +136,6 @@ def async_performance_monitor(operation_name: Optional[str] = None):
     return decorator
 
 
-class AsyncBatchProcessor:
-    """Process items in batches with concurrency control"""
-
-    def __init__(self, max_concurrent: int = 10):
-        self.semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def process_item(self, processor: Callable, item: Any) -> Any:
-        """Process a single item with semaphore control"""
-        async with self.semaphore:
-            return await processor(item)
-
-    async def process_batch(self, processor: Callable, items: list) -> list:
-        """Process a batch of items concurrently"""
-        tasks = [self.process_item(processor, item) for item in items]
-        return await asyncio.gather(*tasks, return_exceptions=True)
-
-
 class SimpleCache:
     """Simple in-memory cache with weak references"""
 
@@ -189,7 +172,6 @@ class SimpleCache:
 
 # Global instances
 performance_monitor_instance = PerformanceMonitor()
-batch_processor = AsyncBatchProcessor()
 simple_cache = SimpleCache()
 
 

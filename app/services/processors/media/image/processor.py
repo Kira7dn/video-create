@@ -14,7 +14,7 @@ import requests
 from pydantic import BaseModel, field_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
-from app.services.processors.core.base_processor import BaseProcessor, ProcessingStage
+from app.services.processors.core.base_processor import AsyncProcessor, ProcessingStage
 from app.core.exceptions import ProcessingError
 from app.config.settings import settings
 from utils.image_utils import is_image_size_valid, search_pixabay_image
@@ -46,7 +46,7 @@ class KeywordExtractionResult(BaseModel):
         return v or "abstract concept"
 
 
-class ImageProcessor(BaseProcessor):
+class ImageProcessor(AsyncProcessor):
     """
     AI-powered image validation and replacement processor using PydanticAI.
     """

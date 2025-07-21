@@ -20,10 +20,15 @@ from app.interfaces.validation import IValidator, ValidationResult
 logger = logging.getLogger(__name__)
 
 
-class ValidationResponse(BaseModel):
-    """Structured response from the validation AI."""
+class AgentValidationSchema(BaseModel):
+    """Structured schema for validation response from the AI agent.
 
-    valid: bool = Field(..., description="Whether the input data is valid")
+    This class defines the expected structure of the validation response
+    returned by the AI agent. It is used for documentation and type hinting
+    purposes to understand the contract between our code and the AI agent.
+    """
+
+    is_valid: bool = Field(..., description="Whether the input data is valid")
     normalized_data: Optional[Dict[str, Any]] = Field(
         None, description="Normalized data, present when valid is true"
     )
@@ -61,10 +66,8 @@ class SchemaValidator(IValidator[Dict[str, Any]]):
             OSError: For other file-related errors.
         """
         self.model = model or settings.ai_pydantic_model
-        self.schema_path = os.path.abspath(
-            schema_path
-            or os.path.join(os.path.dirname(__file__), "../../config/schema.json")
-        )
+        # Sử dụng đường dẫn schema từ cấu hình settings
+        self.schema_path = schema_path or os.path.abspath(settings.schema_path)
         self.schema = self._load_schema()
 
         # System prompt defines the agent's role and basic behavior
@@ -90,7 +93,9 @@ class SchemaValidator(IValidator[Dict[str, Any]]):
 
         # Initialize agent with output type validation
         self.agent = Agent(
-            self.model, system_prompt=self.system_prompt, output_type=ValidationResponse
+            self.model,
+            system_prompt=self.system_prompt,
+            output_type=AgentValidationSchema,
         )
 
     def _load_schema(self) -> dict:
@@ -111,28 +116,40 @@ class SchemaValidator(IValidator[Dict[str, Any]]):
                     raise json.JSONDecodeError("Schema must be a JSON object", "", 0)
                 return schema
         except FileNotFoundError:
-            logger.critical("Schema file not found at %s", self.schema_path)
-            raise
-        except json.JSONDecodeError as e:
             logger.critical(
-                "Invalid JSON in schema file %s: %s", self.schema_path, str(e)
+                "Schema file not found at %s", self.schema_path, exc_info=True
             )
             raise
-        except OSError as e:
+        except json.JSONDecodeError:
             logger.critical(
-                "Failed to load schema from %s: %s", self.schema_path, str(e)
+                "Invalid JSON in schema file %s", self.schema_path, exc_info=True
+            )
+            raise
+        except OSError:
+            logger.critical(
+                "Failed to load schema from %s", self.schema_path, exc_info=True
             )
             raise
 
-    def _validate_sync(self, data: Dict[str, Any]) -> ValidationResult[Dict[str, Any]]:
-        """Synchronously validate data against the schema.
+    async def _validate_async(self, data: Any) -> ValidationResult[Dict[str, Any]]:
+        """Asynchronously validate data against the schema.
+
+        This is the primary validation method that should be used in async contexts.
+        It uses AI-powered validation to check data against the schema.
 
         Args:
-            data: The data to validate.
+            data: The data to validate. Will be converted to dict if not already.
 
         Returns:
-            ValidationResult: Result containing validation status and any errors.
+            ValidationResult containing validation status, any errors, and normalized data
         """
+        if not isinstance(data, dict):
+            try:
+                data = dict(data)
+            except (TypeError, ValueError) as e:
+                result = ValidationResult[Dict[str, Any]]()
+                result.add_error(f"Input data must be dict-like: {str(e)}")
+                return result
         result = ValidationResult[Dict[str, Any]](validated_data=data)
 
         try:
@@ -154,39 +171,77 @@ class SchemaValidator(IValidator[Dict[str, Any]]):
                 "```\n\n"
                 "## INSTRUCTIONS\n"
                 "1. If the data is valid, return a JSON object with: "
-                '{"valid": true, "normalized_data": <original_data>}\n\n'
+                '{"is_valid": true, "normalized_data": <original_data>}\n\n'
                 "2. If the data can be auto-corrected to be valid, return: "
-                '{"valid": true, "normalized_data": <corrected_data>}\n\n'
+                '{"is_valid": true, "normalized_data": <corrected_data>}\n\n'
                 "3. If the data is invalid and cannot be corrected, return: "
-                '{"valid": false, "errors": ["error1", "error2"]}'
+                '{"is_valid": false, "errors": ["error1", "error2"]}'
             )
 
             # Get validation result from AI agent
-            response = self.agent.run(prompt)
+            response = await self.agent.run(prompt)
 
-            # Process the validated result
-            if response.valid:
-                if response.normalized_data is not None:
-                    result.validated_data = response.normalized_data
-                else:
-                    result.validated_data = data
-            elif response.errors:
-                for error in response.errors:
-                    result.add_error(str(error))
+            # Log thông tin cơ bản về response
+            logger.debug("Processing AI agent response")
+
+            # Xử lý response từ AI agent
+            if hasattr(response, "output") and isinstance(
+                response.output, AgentValidationSchema
+            ):
+                agent_schema = response.output
+                logger.debug(
+                    "Received valid validation schema, is_valid=%s",
+                    agent_schema.is_valid,
+                )
+
+                # Chuyển đổi trực tiếp sang ValidationResult
+                result = ValidationResult[Dict[str, Any]]()
+                result.is_valid = agent_schema.is_valid
+
+                if agent_schema.is_valid:
+                    result.validated_data = agent_schema.normalized_data or data
+
+                if not agent_schema.is_valid and agent_schema.errors:
+                    for error in agent_schema.errors:
+                        result.add_error(error)
+
+                logger.debug(
+                    "Validation completed with %d error(s)",
+                    len(result.errors) if result.errors else 0,
+                )
+                return result
+            else:
+                error_msg = (
+                    "Invalid response format from AI agent - missing or invalid output"
+                )
+            logger.error(
+                "%s. Response type: %s, has output: %s",
+                error_msg,
+                type(response).__name__,
+                hasattr(response, "output"),
+            )
+            result = ValidationResult[Dict[str, Any]]()
+            result.add_error(error_msg)
+            return result
 
         except (TypeError, ValueError, json.JSONDecodeError) as e:
             error_msg = f"Failed to process data for validation: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            result = ValidationResult[Dict[str, Any]]()
             result.add_error(error_msg)
+            return result
         except (OSError, AttributeError) as e:
             error_msg = f"System error during validation: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            result = ValidationResult[Dict[str, Any]]()
             result.add_error(error_msg)
-
-        return result
+            return result
 
     def validate(self, data: Any) -> ValidationResult[Dict[str, Any]]:
-        """Validate data against the schema using PydanticAI Agent.
+        """Synchronously validate data against the schema.
+
+        This is a convenience method that wraps the async version.
+        Note: Using validate_async() directly is preferred for better performance.
 
         Args:
             data: The data to validate.
@@ -201,7 +256,33 @@ class SchemaValidator(IValidator[Dict[str, Any]]):
             return result
 
         try:
-            return self._validate_sync(data)
+            # Sử dụng phiên bản đồng bộ từ IValidator
+            return super().validate(data)
+        except (OSError, json.JSONDecodeError, AttributeError) as e:
+            error_msg = f"Failed to process validation: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result.add_error(error_msg)
+            return result
+
+    async def validate_async(self, data: Any) -> ValidationResult[Dict[str, Any]]:
+        """Validate data against the schema asynchronously using PydanticAI Agent.
+
+        This method should be called from async contexts like ValidationProcessor.
+
+        Args:
+            data: The data to validate.
+
+        Returns:
+            ValidationResult: Result containing validation status and any errors.
+        """
+        result = ValidationResult[Dict[str, Any]](validated_data=data)
+
+        if not settings.ai_pydantic_enabled:
+            logger.info("PydanticAI validation is disabled in settings")
+            return result
+
+        try:
+            return await self._validate_async(data)
         except (OSError, json.JSONDecodeError, AttributeError) as e:
             error_msg = f"Failed to process validation: {str(e)}"
             logger.error(error_msg, exc_info=True)
