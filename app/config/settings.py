@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     video_default_codec: str = "libx264"
     video_default_audio_codec: str = "aac"
     video_default_resolution: str = "1920,1080"
+    
+    # Asset Processing Settings
+    segment_asset_types: dict = {
+        "image": "img",
+        "video": "video", 
+        "voice_over": "voice_over"
+    }
     # AWS S3 Settings
     aws_s3_bucket: str = ""
     aws_s3_region: str = "us-east-1"

@@ -6,9 +6,7 @@ This package contains all the interface definitions used across the application.
 
 from .audio import IAudioProcessor
 from .metrics import IMetricsCollector
-from .pipeline import IPipeline
-from .pipeline_context import IPipelineContext
-from .pipeline_stage import IPipelineStage
+from .pipeline import IPipeline, IPipelineContext, IPipelineStage
 from .storage import IDownloader, IUploader
 from .validation import IValidator
 from .video import IVideoProcessor, ISegmentProcessor

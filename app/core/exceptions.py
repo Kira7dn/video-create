@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 import logging
 import traceback
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,10 @@ class VideoCreationError(VideoProcessingError):
 
 class DownloadError(Exception):
     """Exception raised when asset download fails"""
-    pass
-
 
 
 class ProcessingError(Exception):
     """Exception raised when video processing fails"""
-    pass
 
 
 class UploadError(ProcessingError):
@@ -47,6 +44,7 @@ class UploadError(ProcessingError):
     Example:
         raise UploadError("Failed to upload", video_id="abc123")
     """
+
     def __init__(self, message: str, video_id: Optional[str] = None):
         super().__init__(message)
         self.video_id = video_id
@@ -63,7 +61,7 @@ class FileValidationError(Exception):
 
 class ValidationError(VideoProcessingError):
     """Exception raised when input validation fails"""
-    
+
     def __init__(self, message: str, validation_errors: Optional[list] = None):
         super().__init__(message, "VALIDATION_ERROR")
         self.validation_errors = validation_errors or []
@@ -71,8 +69,13 @@ class ValidationError(VideoProcessingError):
 
 class PipelineError(VideoProcessingError):
     """Exception raised when pipeline execution fails"""
-    
-    def __init__(self, message: str, stage_name: Optional[str] = None, stage_errors: Optional[list] = None):
+
+    def __init__(
+        self,
+        message: str,
+        stage_name: Optional[str] = None,
+        stage_errors: Optional[list] = None,
+    ):
         super().__init__(message, "PIPELINE_ERROR")
         self.stage_name = stage_name
         self.stage_errors = stage_errors or []
@@ -80,7 +83,7 @@ class PipelineError(VideoProcessingError):
 
 class ConcatenationError(ProcessingError):
     """Exception raised when video concatenation fails"""
-    
+
     def __init__(self, message: str, video_segments: Optional[list] = None):
         super().__init__(message)
         self.video_segments = video_segments or []
@@ -88,8 +91,13 @@ class ConcatenationError(ProcessingError):
 
 class BatchProcessingError(ProcessingError):
     """Exception raised when batch processing fails"""
-    
-    def __init__(self, message: str, failed_items: Optional[list] = None, successful_items: Optional[list] = None):
+
+    def __init__(
+        self,
+        message: str,
+        failed_items: Optional[list] = None,
+        successful_items: Optional[list] = None,
+    ):
         super().__init__(message)
         self.failed_items = failed_items or []
         self.successful_items = successful_items or []
@@ -97,7 +105,7 @@ class BatchProcessingError(ProcessingError):
 
 class ResourceError(VideoProcessingError):
     """Exception raised when resource management fails"""
-    
+
     def __init__(self, message: str, resource_type: Optional[str] = None):
         super().__init__(message, "RESOURCE_ERROR")
         self.resource_type = resource_type
@@ -105,7 +113,7 @@ class ResourceError(VideoProcessingError):
 
 class ConfigurationError(VideoProcessingError):
     """Exception raised when configuration is invalid"""
-    
+
     def __init__(self, message: str, config_key: Optional[str] = None):
         super().__init__(message, "CONFIGURATION_ERROR")
         self.config_key = config_key
@@ -113,11 +121,43 @@ class ConfigurationError(VideoProcessingError):
 
 class AssetError(DownloadError):
     """Exception raised when asset handling fails"""
-    
-    def __init__(self, message: str, asset_type: Optional[str] = None, asset_url: Optional[str] = None):
+
+    def __init__(
+        self,
+        message: str,
+        asset_type: Optional[str] = None,
+        asset_url: Optional[str] = None,
+    ):
         super().__init__(message)
         self.asset_type = asset_type
         self.asset_url = asset_url
+
+
+class TranscriptError(VideoProcessingError):
+    """Base exception for transcript processing errors"""
+
+    def __init__(self, message: str, error_code: Optional[str] = None):
+        super().__init__(message, error_code or "TRANSCRIPT_ERROR")
+
+
+class AudioProcessingError(TranscriptError):
+    """Exception raised when audio file processing fails"""
+
+    def __init__(self, message: Optional[str] = None, file_path: Optional[str] = None):
+        self.file_path = file_path
+        msg = message or f"Error processing audio file: {file_path}"
+        super().__init__(msg, "AUDIO_PROCESSING_ERROR")
+
+
+class AlignmentError(TranscriptError):
+    """Exception raised when audio-text alignment fails"""
+
+    def __init__(
+        self, message: Optional[str] = None, alignment_data: Optional[Dict] = None
+    ):
+        self.alignment_data = alignment_data or {}
+        msg = message or "Error during alignment process"
+        super().__init__(msg, "ALIGNMENT_ERROR")
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

@@ -11,68 +11,56 @@ import logging
 import os
 import subprocess
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from app.config import settings
 from app.core.exceptions import ProcessingError, VideoCreationError
-from app.interfaces import IAudioProcessor, ISegmentProcessor
 from app.services.processors.media.audio.processor import AudioProcessor
 from app.services.processors.core.base_processor import AsyncProcessor, ProcessingStage
+from app.services.processors.media.video.transition_processor import TransitionProcessor
 from app.services.processors.text.overlay import TextOverlayProcessor
-from app.services.processors.media.video.processor import VideoProcessor
 from utils.subprocess_utils import safe_subprocess_run
 from utils.image_utils import process_image
 
 logger = logging.getLogger(__name__)
 
 
-class SegmentProcessor(AsyncProcessor, ISegmentProcessor):
-    """Handles creation of a single video segment clip from a segment dict"""
+class VideoProcessor(AsyncProcessor):
+    """Pipeline Processor for creating individual segment clips from List of segments"""
 
-    def __init__(self, metrics_collector=None, audio_processor: IAudioProcessor = None):
-        """Initialize the SegmentProcessor.
-
-        Args:
-            metrics_collector: Optional metrics collector instance
-            audio_processor: Audio processor instance (defaults to AudioProcessor)
-        """
-        super().__init__(metrics_collector)
-        self.audio_processor = audio_processor or AudioProcessor()
-        self.text_processor = TextOverlayProcessor()
-        self.transition_processor = VideoProcessor()
-
-    async def _process_async(
-        self, input_data: Dict[str, Any], **kwargs
-    ) -> Dict[str, Any]:
+    async def process(
+        self, input_data: List[Dict[str, Any]], **kwargs
+    ) -> List[Dict[str, str]]:
         """Process input data asynchronously by delegating to process_segment.
 
         This method implements the abstract method from BaseProcessor.
 
         Args:
-            input_data: Dictionary containing segment information
+            input_data: List of segment dictionaries
             **kwargs: Additional processing parameters
 
         Returns:
-            Dictionary containing processing results
+            List of dictionaries containing processing results
         """
-        return await self.process_segment(input_data, **kwargs)
+        context = kwargs.get("context", {})
+        temp_dir = context.temp_dir
+        processed_segments = input_data or context.processed_segments
+        if not processed_segments:
+            raise ProcessingError("No segments found to process")
+        clip_paths = []
+        for segment in processed_segments:
+            try:
+                clip_info = await self.process_segment(segment, temp_dir, **kwargs)
+                clip_paths.append(clip_info)
+            except Exception as e:
+                logger.error(
+                    "Failed to process segment %s: %s", segment.get("id"), str(e)
+                )
+                raise ProcessingError(
+                    f"Failed to process segment {segment.get('id')}: {str(e)}"
+                ) from e
 
-    async def process(self, input_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Process input data by delegating to _process_async.
-
-        This method is maintained for backward compatibility.
-
-        Args:
-            input_data: Dictionary containing segment information
-            **kwargs: Additional processing parameters
-
-        Returns:
-            Dictionary containing processing results
-
-        Raises:
-            ProcessingError: If processing fails
-        """
-        return await self._process_async(input_data, **kwargs)
+        return clip_paths
 
     async def process_segment(
         self, segment: Dict[str, Any], temp_dir: str, **kwargs
@@ -160,9 +148,9 @@ class SegmentProcessor(AsyncProcessor, ISegmentProcessor):
         Raises:
             VideoCreationError: If required resources are missing or processing fails.
         """
-        image_obj = segment.get("image", {})
+        bg_image_obj = segment.get("image", {})
         video_obj = segment.get("video", {})
-        bg_image_path = image_obj.get("local_path")
+        bg_image_path = bg_image_obj.get("local_path")
         video_path = video_obj.get("local_path")
 
         # Ensure transition_in and transition_out are always dictionaries
@@ -175,6 +163,7 @@ class SegmentProcessor(AsyncProcessor, ISegmentProcessor):
         if not isinstance(transition_out, dict):
             logger.warning("transition_out is not a dictionary, using default values")
             transition_out = {}
+
         segment_id = segment.get("id", str(uuid.uuid4()))
         voice_over = segment.get("voice_over", {})
         segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")

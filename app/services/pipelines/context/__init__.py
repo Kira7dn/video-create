@@ -4,6 +4,6 @@ Package containing pipeline context implementations.
 This package provides concrete implementations of IPipelineContext.
 """
 
-from .default import DefaultPipelineContext
+from .default import PipelineContext
 
-__all__ = ["DefaultPipelineContext"]
+__all__ = ["PipelineContext"]

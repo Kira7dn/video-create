@@ -23,12 +23,9 @@ from .core.metrics import MetricsCollector, ProcessingMetrics, ProcessingStage
 
 # Media processing
 from .media.audio.processor import AudioProcessor
-from .media.video.processor import VideoProcessor
+from .media.video.video_processor import VideoProcessor
 from .media.image.processor import ImageProcessor
 
-# Workflow
-from .workflow.segment_processor import SegmentProcessor
-from .workflow.composer import ConcatenationProcessor
 
 # I/O
 from .io.download import DownloadProcessor
@@ -53,9 +50,6 @@ __all__ = [
     "AudioProcessor",
     "VideoProcessor",
     "ImageProcessor",
-    # Workflow
-    "SegmentProcessor",
-    "ConcatenationProcessor",
     # I/O
     "DownloadProcessor",
     "S3UploadProcessor",

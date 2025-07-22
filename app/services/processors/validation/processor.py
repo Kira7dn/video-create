@@ -41,7 +41,7 @@ class ValidationProcessor(AsyncProcessor):
             SchemaValidator(),
         ]
 
-    async def _process_async(self, input_data: Any, **kwargs) -> Any:
+    async def process(self, input_data: Any, **kwargs) -> Any:
         """
         Process input data by validating it through all validators in sequence.
         This is the internal implementation of the async processing.
@@ -64,12 +64,16 @@ class ValidationProcessor(AsyncProcessor):
                 error_msg = "\n".join(result.errors)
                 # Increment error counter
                 self.metrics_collector.increment_counter("validation_errors")
-                self.metrics_collector.end_stage(metric, success=False, error_message=error_msg)
+                self.metrics_collector.end_stage(
+                    metric, success=False, error_message=error_msg
+                )
                 raise ValueError(error_msg)
             self.metrics_collector.end_stage(metric, success=True)
             return result.validated_data
         except Exception as e:
-            self.metrics_collector.end_stage(metric, success=False, error_message=str(e))
+            self.metrics_collector.end_stage(
+                metric, success=False, error_message=str(e)
+            )
             raise
 
     async def _validate(self, data: Any, **kwargs) -> ValidationResult[Any]:
@@ -90,7 +94,6 @@ class ValidationProcessor(AsyncProcessor):
             self.logger.debug("Running validator: %s", validator_name)
 
             # Start tracking validator execution time
-            validator_stage = f"validator_{validator_name.lower()}"
             metric = self.metrics_collector.start_stage(ProcessingStage.PROCESSING)
             try:
                 # Use validate_async if available, otherwise fall back to sync
@@ -114,29 +117,29 @@ class ValidationProcessor(AsyncProcessor):
                     result.add_error(error_msg)
                     result.is_valid = False
                     self.metrics_collector.end_stage(
-                        metric, 
-                        success=False, 
-                        error_message=error_msg
+                        metric, success=False, error_message=error_msg
                     )
                     break
 
                 if not validator_result.is_valid:
-                    error_msg = f"{validator_name} failed: {', '.join(validator_result.errors)}"
+                    error_msg = (
+                        f"{validator_name} failed: {', '.join(validator_result.errors)}"
+                    )
                     result.is_valid = False
                     result.errors.extend(validator_result.errors)
                     # Increment validation error counter
-                    self.metrics_collector.increment_counter(f"validator_{validator_name.lower()}_errors")
+                    self.metrics_collector.increment_counter(
+                        f"validator_{validator_name.lower()}_errors"
+                    )
                     self.metrics_collector.end_stage(
-                        metric,
-                        success=False,
-                        error_message=error_msg
+                        metric, success=False, error_message=error_msg
                     )
                     break
 
                 if validator_result.validated_data is not None:
                     current_data = validator_result.validated_data
                     result.validated_data = current_data
-                
+
                 # End stage successfully if we got here
                 self.metrics_collector.end_stage(metric, success=True)
 
@@ -148,9 +151,7 @@ class ValidationProcessor(AsyncProcessor):
                 # Increment exception counter
                 self.metrics_collector.increment_counter("validator_exceptions")
                 self.metrics_collector.end_stage(
-                    metric,
-                    success=False,
-                    error_message=error_msg
+                    metric, success=False, error_message=error_msg
                 )
                 break  # Stop on first error
 

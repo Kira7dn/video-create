@@ -140,10 +140,12 @@ class AsyncProcessor(ProcessorBase):
 
     This should be used for I/O-bound operations that benefit from async/await.
     Examples: API calls, file operations, database queries, network requests.
+    
+    Subclasses should implement the actual processing logic in the process() method.
     """
 
     @abstractmethod
-    async def _process_async(self, input_data: Any, **kwargs) -> Any:
+    async def process(self, input_data: Any, **kwargs) -> Any:
         """Implement asynchronous processing logic.
 
         This method must be implemented by subclasses to define the actual
@@ -155,44 +157,11 @@ class AsyncProcessor(ProcessorBase):
 
         Returns:
             Processed result
-        """
-        raise NotImplementedError("Subclasses must implement _process_async")
-
-    async def process(self, input_data: Any, **kwargs) -> Any:
-        """Main entry point with error handling and metrics.
-
-        Args:
-            input_data: Data to process
-            **kwargs: Additional processing parameters
-
-        Returns:
-            Processed result
-
+            
         Raises:
-            Exception: Re-raises any exception from _process_async after logging
+            Exception: Any exception that occurs during processing
         """
-        stage = kwargs.get("processing_stage", ProcessingStage.PROCESSING)
-        metric = self._start_processing(stage)
-
-        try:
-            self.logger.debug(
-                "Starting asynchronous processing",
-                extra={"input_type": type(input_data).__name__},
-            )
-
-            result = await self._process_async(input_data, **kwargs)
-
-            self.logger.debug(
-                "Asynchronous processing completed successfully",
-                extra={"result_type": type(result).__name__},
-            )
-
-            self._end_processing(metric, success=True, items_processed=1)
-            return result
-
-        except Exception as e:
-            self._handle_processing_error(e, metric)
-            raise
+        raise NotImplementedError("Subclasses must implement process()")
 
     def __call__(self, *args, **kwargs):
         """Prevent direct sync calls to the processor.

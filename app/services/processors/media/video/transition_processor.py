@@ -5,7 +5,7 @@ from app.services.processors.core.base_processor import AsyncProcessor
 logger = logging.getLogger(__name__)
 
 
-class VideoProcessor(AsyncProcessor):
+class TransitionProcessor(AsyncProcessor):
     """Handles transition filter logic for video and audio"""
 
     @staticmethod

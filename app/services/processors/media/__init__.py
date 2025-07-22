@@ -7,7 +7,7 @@ including audio, video, and images.
 
 # Import processors from submodules
 from .audio.processor import AudioProcessor
-from .video.processor import VideoProcessor
+from .video.video_processor import VideoProcessor
 from .image.processor import ImageProcessor
 
 __all__ = [

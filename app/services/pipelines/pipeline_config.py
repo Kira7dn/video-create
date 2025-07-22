@@ -17,7 +17,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "request_validation",
-            "processor_class": "app.services.processors.validation.create_chained_validator",
+            "processor_class": "app.services.processors.validation.ValidationProcessor.create_chained_validator",
             "input_key": "json_data",
             "output_key": "validated_data",
             "required_inputs": ["json_data"],
@@ -26,10 +26,10 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "download_assets",
-            "processor_class": "app.services.processors.download_processor.DownloadProcessor",
-            "input_key": "json_data",
+            "processor_class": "app.services.processors.io.DownloadProcessor",
+            "input_key": "validated_data",
             "output_key": "download_results",
-            "required_inputs": ["json_data"],
+            "required_inputs": ["validated_data"],
         },
         # Stage 3: Image auto processing
         {
@@ -53,7 +53,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "create_segment_clips",
-            "processor_class": "app.services.processors.segment_processor.SegmentProcessor",
+            "processor_class": "app.services.processors.workflow.segment_processor.SegmentProcessor",
             "input_key": "processed_segments",
             "output_key": "segment_clips",
             "required_inputs": ["processed_segments"],

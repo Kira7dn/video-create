@@ -101,6 +101,7 @@ result/
 *MIGRATION*.md
 *AUDIO_MIGRATION*.md
 .pytest_cache/
+*GUIDELINES*.md
 
 # Sample and example files
 input_sample*.json

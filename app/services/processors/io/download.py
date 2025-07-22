@@ -5,13 +5,12 @@ Processor for downloading assets in the video creation pipeline.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
-
-import aiohttp
+from typing import Any, Dict, List
 
 from app.core.exceptions import DownloadError
-from app.services.download_service import DownloadService
 from app.services.processors.core.base_processor import AsyncProcessor
+from app.config.settings import settings
+from utils.download_utils import download_file
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +23,15 @@ class DownloadProcessor(AsyncProcessor):
     to the temporary directory.
     """
 
-    def __init__(self, metrics_collector=None):
-        super().__init__(metrics_collector)
-        self.download_service = DownloadService()
-
-    async def _process_async(
-        self, input_data: Dict, **kwargs
-    ) -> Tuple[List[str], List[str]]:
+    async def process(self, input_data: Dict, **kwargs) -> List[Dict[str, str]]:
         """
         Download all assets to the temporary directory.
 
         Args:
-            input_data: Dictionary containing 'json_data' and 'temp_dir'
+            input_data: Dictionary containing 'segments' and 'background_music'
 
         Returns:
-            Tuple of (downloaded_files, failed_downloads)
+            List of dict for segments with local_path each segment (add background_music to context)
 
         Raises:
             DownloadError: If required parameters are missing or download fails
@@ -47,118 +40,126 @@ class DownloadProcessor(AsyncProcessor):
         if not context:
             raise DownloadError("Context is required for downloading assets")
 
-        json_data = input_data.get("json_data")
-        temp_dir = input_data.get("temp_dir")
+        segments = input_data.get("segments")
+        background_music = input_data.get("background_music")
+        temp_dir = context.temp_dir
 
-        if not json_data or not temp_dir:
-            raise DownloadError("json_data and temp_dir are required in input_data")
+        if not isinstance(segments, list):
+            raise DownloadError("Segments must be a list of dictionaries")
+        if not segments:
+            raise DownloadError("Segments list cannot be empty")
 
-        # Create temp directory if it doesn't exist
-        temp_path = Path(temp_dir)
-        temp_path.mkdir(parents=True, exist_ok=True)
+        # Prepare tasks for all downloads
+        download_tasks = []
+        results = []
 
-        # Extract assets from JSON data
-        assets = self._extract_assets(json_data)
+        # Add segment downloads - Preserve original structure, add local_path to assets
+        for i, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                raise DownloadError(f"Segment must be a dictionary, got {type(segment)}")
+            
+            segment_id = segment.get("id", f"segment_{i}")
+            result_segment = segment.copy()
 
-        # Download assets
-        downloaded_files = []
-        failed_downloads = []
+            # Get supported segment asset types from settings
+            asset_types = settings.segment_asset_types
 
-        for asset_type, asset_url in assets:
-            try:
-                # Generate destination path
-                dest_filename = f"{asset_type}_{Path(asset_url).name}"
-                dest_path = str(temp_path / dest_filename)
+            for asset_type, prefix in asset_types.items():
+                if asset_type in segment and isinstance(segment[asset_type], dict) and segment[asset_type].get("url"):
+                    asset_data = segment[asset_type]
+                    asset_url = asset_data["url"]
 
-                # Download using the download service
-                file_path = await self.download_service.download(
-                    asset_url, destination=dest_path, overwrite=True
-                )
+                    # Generate destination path
+                    dest_filename = f"{segment_id}_{prefix}_{Path(asset_url).name}"
+                    dest_path = str(Path(temp_dir) / dest_filename)
 
-                downloaded_files.append(str(file_path))
-                self.logger.info("Downloaded %s: %s", asset_type, file_path)
-
-            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-                # More specific exception handling
-                error_msg = f"Failed to download {asset_url}: {str(e)}"
-                failed_downloads.append(asset_url)
-                self.logger.error(error_msg)
-
-                # Record failed download in metrics if available
-                if hasattr(self, "metrics_collector"):
-                    await self.metrics_collector.increment_counter(
-                        "asset_download_failed",
-                        tags={"asset_type": asset_type, "error": str(e)[:100]},
+                    # Add download task
+                    download_tasks.append(
+                        self._download_asset(
+                            url=asset_url,
+                            dest_path=dest_path,
+                            asset_type=asset_type,
+                            segment_id=segment_id,
+                        )
                     )
 
-            except (ValueError, RuntimeError, asyncio.CancelledError) as e:
-                # Catch other specific exceptions that might occur
-                error_type = type(e).__name__
-                error_msg = f"{error_type} while downloading {asset_url}: {str(e)}"
-                failed_downloads.append(asset_url)
-                self.logger.error(error_msg, exc_info=True)
+                    # Add local_path to the original asset structure
+                    result_segment[asset_type] = asset_data.copy()
+                    result_segment[asset_type]["local_path"] = dest_path
 
-                if hasattr(self, "metrics_collector"):
-                    await self.metrics_collector.increment_counter(
-                        "asset_download_error",
-                        tags={
-                            "asset_type": asset_type,
-                            "error": error_type.lower(),
-                            "source": "processor",
-                        },
-                    )
+            # Always add segment to results (preserve structure even if no assets)
+            results.append(result_segment)
 
-        # Update context
-        context.downloaded_files = downloaded_files
-        context.failed_downloads = failed_downloads
+        # Add background music download
+        if not isinstance(background_music, dict) or "url" not in background_music:
+            raise DownloadError("background_music must be an object with 'url' field")
 
-        # Record metrics
-        if hasattr(self, "metrics_collector"):
-            await self.metrics_collector.record_metric(
-                "assets_downloaded", len(downloaded_files), tags={"status": "success"}
+        bg_dest_path = str(
+            Path(temp_dir) / f"bg_music_{Path(background_music['url']).name}"
+        )
+        download_tasks.append(
+            self._download_asset(
+                url=background_music["url"],
+                dest_path=bg_dest_path,
+                asset_type="background_music",
+                segment_id="bg_music",
             )
-            if failed_downloads:
-                await self.metrics_collector.record_metric(
-                    "assets_downloaded",
-                    len(failed_downloads),
-                    tags={"status": "failed"},
+        )
+
+        # Store background music info in context
+        context.background_music = {
+            "url": background_music["url"],
+            "local_path": bg_dest_path,
+            "volume": background_music.get("volume", 0.2),
+            "start_delay": background_music.get("start_delay", 0),
+            "end_delay": background_music.get("end_delay", 0),
+            "fade_in": background_music.get("fade_in", 0.0),
+            "fade_out": background_music.get("fade_out", 0.0),
+        }
+
+        # Execute all downloads concurrently
+        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+
+        # Check for any failed downloads
+        failed_downloads = [
+            r
+            for r in download_results
+            if isinstance(r, Exception)
+            or (isinstance(r, dict) and not r.get("success"))
+        ]
+
+        if failed_downloads:
+            error_details = "\n".join(
+                str(error) for error in failed_downloads[:5]  # Limit error details
+            )
+            raise DownloadError(
+                f"Failed to download {len(failed_downloads)} assets. First few errors:\n{error_details}"
+            )
+
+        return results
+
+    async def _download_asset(
+        self, url: str, dest_path: str, asset_type: str, segment_id: str
+    ) -> Dict[str, Any]:
+        """Helper method to download a single asset"""
+        try:
+            file_path = await download_file(url, destination=dest_path, overwrite=True)
+            self.logger.debug(
+                "Downloaded %s asset from %s to %s", asset_type, url, file_path
+            )
+            return {"success": True, "path": str(file_path)}
+
+        except Exception as e:
+            error_msg = f"Failed to download {asset_type} from {url}: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+
+            if hasattr(self, "metrics_collector"):
+                await self.metrics_collector.increment_counter(
+                    "asset_download_failed",
+                    tags={
+                        "asset_type": asset_type,
+                        "error": str(e)[:100],
+                        "segment_id": segment_id,
+                    },
                 )
-
-        return downloaded_files, failed_downloads
-
-    def _extract_assets(self, json_data: Dict) -> List[Tuple[str, str]]:
-        """
-        Extract asset URLs from JSON data.
-
-        Args:
-            json_data: The input JSON data
-
-        Returns:
-            List of tuples (asset_type, asset_url)
-        """
-        assets = []
-
-        # Extract background images
-        if "background" in json_data and "url" in json_data["background"]:
-            assets.append(("background", json_data["background"]["url"]))
-
-        # Extract overlay images
-        if "overlays" in json_data:
-            for overlay in json_data["overlays"]:
-                if "url" in overlay:
-                    assets.append(("overlay", overlay["url"]))
-
-        # Extract audio tracks
-        if "audio" in json_data:
-            if (
-                "background_music" in json_data["audio"]
-                and "url" in json_data["audio"]["background_music"]
-            ):
-                assets.append(("audio", json_data["audio"]["background_music"]["url"]))
-            if (
-                "voice_over" in json_data["audio"]
-                and "url" in json_data["audio"]["voice_over"]
-            ):
-                assets.append(("audio", json_data["audio"]["voice_over"]["url"]))
-
-        return assets
+            raise
