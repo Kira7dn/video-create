@@ -56,16 +56,23 @@ class DownloadProcessor(AsyncProcessor):
         # Add segment downloads - Preserve original structure, add local_path to assets
         for i, segment in enumerate(segments):
             if not isinstance(segment, dict):
-                raise DownloadError(f"Segment must be a dictionary, got {type(segment)}")
-            
+                raise DownloadError(
+                    f"Segment must be a dictionary, got {type(segment)}"
+                )
+
             segment_id = segment.get("id", f"segment_{i}")
             result_segment = segment.copy()
+            result_background_music = background_music.copy()
 
             # Get supported segment asset types from settings
             asset_types = settings.segment_asset_types
 
             for asset_type, prefix in asset_types.items():
-                if asset_type in segment and isinstance(segment[asset_type], dict) and segment[asset_type].get("url"):
+                if (
+                    asset_type in segment
+                    and isinstance(segment[asset_type], dict)
+                    and segment[asset_type].get("url")
+                ):
                     asset_data = segment[asset_type]
                     asset_url = asset_data["url"]
 
@@ -105,17 +112,10 @@ class DownloadProcessor(AsyncProcessor):
                 segment_id="bg_music",
             )
         )
+        result_background_music["local_path"] = bg_dest_path
 
         # Store background music info in context
-        context.background_music = {
-            "url": background_music["url"],
-            "local_path": bg_dest_path,
-            "volume": background_music.get("volume", 0.2),
-            "start_delay": background_music.get("start_delay", 0),
-            "end_delay": background_music.get("end_delay", 0),
-            "fade_in": background_music.get("fade_in", 0.0),
-            "fade_out": background_music.get("fade_out", 0.0),
-        }
+        context.set("background_music", result_background_music)
 
         # Execute all downloads concurrently
         download_results = await asyncio.gather(*download_tasks, return_exceptions=True)

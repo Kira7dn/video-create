@@ -203,13 +203,11 @@ class TranscriptProcessor(AsyncProcessor):
         Args:
             input_data: Danh sách các segment cần xử lý, mỗi segment phải chứa:
                 - id: Định danh duy nhất của segment
-                - voice_over: Chứa thông tin audio và transcript:
+                - voice_over (tùy chọn): Chứa thông tin audio và transcript:
                     - local_path: Đường dẫn đến file audio
                     - content: Nội dung transcript
-                    - transcript_lines: (tùy chọn) Các dòng transcript đã được phân đoạn
             **kwargs: Các tham số bổ sung:
                 - context: Chứa thông tin ngữ cảnh bổ sung
-                - temp_dir: Thư mục tạm để lưu file transcript (nếu không dùng thư mục tạm hệ thống)
 
         Returns:
             List[Dict]: Danh sách các segment đã được xử lý với trường 'text_over' bổ sung
@@ -219,7 +217,6 @@ class TranscriptProcessor(AsyncProcessor):
 
         Note:
             - Mỗi segment được xử lý độc lập, lỗi ở một segment không ảnh hưởng đến các segment khác
-            - File tạm sẽ được tự động dọn dẹp sau khi xử lý xong
         """
         if not input_data:
             self.logger.warning("Không có dữ liệu đầu vào để xử lý")

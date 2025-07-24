@@ -17,7 +17,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "request_validation",
-            "processor_class": "app.services.processors.validation.ValidationProcessor.create_chained_validator",
+            "processor_class": "app.services.processors.validation.ValidationProcessor",
             "input_key": "json_data",
             "output_key": "validated_data",
             "required_inputs": ["json_data"],
@@ -35,16 +35,16 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "image_auto",
-            "processor_class": "app.services.processors.image_auto_processor.ImageAutoProcessor",
+            "processor_class": "app.services.processors.media.image.processor.ImageProcessor",
             "input_key": "download_results",
             "output_key": "processed_segments",
             "required_inputs": ["download_results"],
         },
-        # Stage 4: Text overlay alignment
+        # Stage 4: Transcript alignment
         {
             "type": "processor",
-            "name": "text_overlay_alignment",
-            "processor_class": "app.services.processors.transcript_processor.TranscriptProcessor",
+            "name": "transcript_alignment",
+            "processor_class": "app.services.processors.media.text.transcript.TranscriptProcessor",
             "input_key": "processed_segments",
             "output_key": "processed_segments",
             "required_inputs": ["processed_segments"],
@@ -53,7 +53,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "create_segment_clips",
-            "processor_class": "app.services.processors.workflow.segment_processor.SegmentProcessor",
+            "processor_class": "app.services.processors.media.video.video_processor.VideoProcessor",
             "input_key": "processed_segments",
             "output_key": "segment_clips",
             "required_inputs": ["processed_segments"],
