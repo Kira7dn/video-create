@@ -22,7 +22,6 @@ from app.core.exceptions import (
 )
 from app.services.pipelines import create_video_creation_pipeline
 from app.services.pipelines.context.default import PipelineContext
-from app.services.processors.core.base_processor import MetricsCollector
 from utils.resource_manager import (
     cleanup_old_temp_directories,
     managed_temp_directory,
@@ -40,7 +39,6 @@ class VideoCreationService:
     """
 
     def __init__(self):
-        self.metrics_collector = MetricsCollector()
         self._ensure_output_directory()
         self._cleanup_old_directories()
 
@@ -70,9 +68,6 @@ class VideoCreationService:
         """
         Create a video from JSON data with improved resource management and pipeline processing
         """
-        # Reset metrics for new request
-        self.metrics_collector = MetricsCollector()
-
         video_id = uuid.uuid4().hex
 
         # Use async context manager for temporary directory
@@ -90,44 +85,6 @@ class VideoCreationService:
             except Exception as e:
                 logger.error("Unexpected error in video creation: %s", e, exc_info=True)
                 raise VideoCreationError(f"Video creation failed: {e}") from e
-            finally:
-                # Log processing summary
-                self._log_processing_summary()
-
-    def _log_processing_summary(self):
-        """Log processing metrics summary"""
-        try:
-            summary = self.metrics_collector.get_summary()
-            logger.info("🎬 Video Creation Summary:")
-            logger.info("   Total Duration: %s", summary["total_duration"])
-            logger.info("   Total Items Processed: %s", summary["total_items"])
-
-            if summary["failed_stages"]:
-                logger.warning(
-                    "   Failed Stages: %s", ", ".join(summary["failed_stages"])
-                )
-
-            for stage in summary["stages"]:
-                status_emoji = "✅" if stage["success"] else "❌"
-                logger.info(
-                    "   %s %s: %s (%s items)",
-                    status_emoji,
-                    stage["stage"],
-                    stage["duration"],
-                    stage["items_processed"],
-                )
-        except (KeyError, AttributeError, TypeError, ValueError) as e:
-            logger.warning(
-                "Failed to log processing summary due to data issue: %s",
-                e,
-                exc_info=True,
-            )
-        except Exception as e:
-            logger.error(
-                "Unexpected error in log processing summary: %s", e, exc_info=True
-            )
-            # Không bắt lại exception ở đây để cho phép lỗi nghiêm trọng được bắt ở tầng cao hơn
-            raise
 
     async def _process_video_creation_pipeline(
         self, json_data: Dict, temp_dir: str, video_id: str
@@ -162,14 +119,13 @@ class VideoCreationService:
         )
 
         # Create and execute pipeline
-        pipeline = create_video_creation_pipeline(
-            metrics_collector=self.metrics_collector
-        )
-        result_context = await pipeline.execute(context)
+        pipeline = create_video_creation_pipeline()
+        result = await pipeline.execute(context)
+        context: PipelineContext = result.get("context")
 
         # Validate and return results
-        final_video_path = result_context.get("final_video_path")
-        s3_url = result_context.get("s3_upload_result")
+        final_video_path = context.get("final_video_path")
+        s3_url = context.get("final_video_url")
 
         if not final_video_path or not os.path.exists(final_video_path):
             raise VideoCreationError("Final video was not created successfully")

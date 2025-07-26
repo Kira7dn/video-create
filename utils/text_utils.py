@@ -182,33 +182,35 @@ async def split_transcript(content: str) -> List[str]:
             )
 
             prompt = f"""
-                Split this transcript into natural speech segments that feel organic and readable:
+                Split this transcript into natural speech segments for video text overlay:
 
                 "{content}"
 
-                Natural Speech Requirements:
-                - Each segment: 3-7 words (natural phrase boundaries)
-                - Maximum 35 characters per segment
-                - Break at natural breath pauses and thought boundaries
-                - Keep compound words/phrases together
-                - Maintain natural speech rhythm
-                - Each segment should feel complete
-                - Perfect for natural reading pace (2-4 seconds)
+                CRITICAL REQUIREMENTS:
+                1. PRESERVE ALL CONTENT - Every word must be included
+                2. Each segment: 4-12 words (readable chunks)
+                3. Maximum 80 characters per segment (screen readability)
+                4. Break at natural phrase boundaries
+                5. Keep related concepts together
+                6. Maintain logical flow and meaning
+                7. Perfect for video text overlay (3-6 seconds per segment)
 
-                Example of natural segmentation:
+                Example of good segmentation:
                 {{
                 "segments": [
-                    "Hello everyone",
-                    "welcome back to",
-                    "our channel",
-                    "today we're going to",
-                    "explore machine learning",
-                    "and its applications"
+                    "Hello everyone and welcome back",
+                    "to our channel about technology",
+                    "Today we're going to explore",
+                    "machine learning and its applications",
+                    "in the modern world"
                 ]
                 }}
 
-                Focus on natural speech patterns, not just word counts!
-                Return as JSON object with segments array.
+                IMPORTANT: 
+                - Do NOT skip any words from the original transcript
+                - Segments should be substantial enough for easy reading
+                - Focus on meaning preservation over strict word counts
+                - Return as JSON object with segments array
                 """
             return await agent.run(user_prompt=prompt)
 
@@ -238,6 +240,13 @@ async def split_transcript(content: str) -> List[str]:
         transcript_segments = result.data
         duration = time.time() - start_time
 
+        # Validate content preservation
+        if not _validate_content_preservation(content, transcript_segments.segments):
+            logger.warning(
+                "LLM output failed content preservation check. Using fallback method."
+            )
+            return _fallback_split(content)
+
         logger.debug(
             "Completed transcript segmentation in %.2f seconds, created %d segments",
             duration,
@@ -257,38 +266,101 @@ async def split_transcript(content: str) -> List[str]:
         return _fallback_split(content)
 
 
+def _validate_content_preservation(original: str, segments: List[str]) -> bool:
+    """Validate that LLM output preserves all content from original transcript.
+    
+    Args:
+        original: Original transcript content
+        segments: List of segmented transcript parts
+        
+    Returns:
+        bool: True if content is preserved, False otherwise
+    """
+    if not segments:
+        return False
+        
+    # Normalize both original and segmented content for comparison
+    original_words = set(re.findall(r'\b\w+\b', original.lower()))
+    segment_words = set()
+    
+    for segment in segments:
+        segment_words.update(re.findall(r'\b\w+\b', segment.lower()))
+    
+    # Check if we preserved at least 95% of original words
+    if not original_words:
+        return len(segments) > 0
+        
+    preservation_ratio = len(segment_words & original_words) / len(original_words)
+    
+    if preservation_ratio < 0.95:
+        logger.warning(
+            f"Content preservation check failed: {preservation_ratio:.2%} of words preserved. "
+            f"Missing words: {original_words - segment_words}"
+        )
+        return False
+        
+    return True
+
+
 def _fallback_split(content: str) -> List[str]:
-    """Fallback method for splitting transcript when LLM fails.
+    """Improved fallback method for splitting transcript when LLM fails.
 
     Args:
         content: The transcript content to split.
 
     Returns:
-        List of split segments.
+        List of split segments with better content preservation.
     """
-    # Split on sentence boundaries and conjunctions
+    if not content.strip():
+        return []
+        
+    # More comprehensive splitting patterns
     sentence_enders = r"(?<=[.!?])\s+"
-    comma_separators = r"(?<=,)\s+"
-    conjunctions = r"\s+(?=and|or|but|so|because|when|if|while|although)\s+"
-
-    pattern = f"{sentence_enders}|{comma_separators}|{conjunctions}"
-
+    comma_separators = r"(?<=,)\s+(?=\w)"
+    conjunctions = r"\s+(?=(?:and|or|but|so|because|when|if|while|although|however|therefore|moreover)\s+)"
+    natural_pauses = r"\s+(?=(?:now|then|next|first|second|finally|meanwhile|additionally)\s+)"
+    
+    # Combine all patterns
+    pattern = f"{sentence_enders}|{comma_separators}|{conjunctions}|{natural_pauses}"
+    
     # Split and clean up whitespace
-    segments = [s.strip() for s in re.split(pattern, content) if s.strip()]
-
-    # Further split long segments
+    segments = [s.strip() for s in re.split(pattern, content, flags=re.IGNORECASE) if s.strip()]
+    
+    # Process segments to ensure good readability
     result = []
     for segment in segments:
         words = segment.split()
-        if len(words) <= 7 and len(segment) <= 35:
+        
+        # If segment is good size (4-12 words, ≤80 chars), keep it
+        if 4 <= len(words) <= 12 and len(segment) <= 80:
             result.append(segment)
+        elif len(words) <= 3:
+            # Very short segments - try to combine with previous
+            if result and len(result[-1].split()) + len(words) <= 12:
+                result[-1] = result[-1] + " " + segment
+            else:
+                result.append(segment)
         else:
-            # Simple split for long segments
-            for i in range(0, len(words), 5):
-                chunk = words[i : i + 5]
-                if chunk:
-                    result.append(" ".join(chunk))
-
+            # Long segments - split more carefully
+            for i in range(0, len(words), 8):  # Larger chunks than before
+                chunk_words = words[i : i + 8]
+                if chunk_words:
+                    chunk = " ".join(chunk_words)
+                    result.append(chunk)
+    
+    # Final validation - ensure no empty segments
+    result = [s for s in result if s.strip()]
+    
+    # If we still have no segments, create one from the original content
+    if not result and content.strip():
+        # Split the entire content into reasonable chunks
+        words = content.split()
+        for i in range(0, len(words), 8):
+            chunk_words = words[i : i + 8]
+            if chunk_words:
+                result.append(" ".join(chunk_words))
+    
+    logger.debug(f"Fallback split created {len(result)} segments from original content")
     return result
 
 

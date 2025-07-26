@@ -8,12 +8,12 @@ all required fields are present and properly formatted.
 import logging
 from typing import Any, Dict
 
-from app.interfaces.validation import IValidator, ValidationResult
+from app.interfaces.validation import ValidationResult
 
 logger = logging.getLogger(__name__)
 
 
-class BasicValidator(IValidator[Dict[str, Any]]):
+class BasicValidator:
     """Validates the basic structure of video creation data.
 
     This validator performs minimal validation to ensure:
@@ -21,18 +21,6 @@ class BasicValidator(IValidator[Dict[str, Any]]):
     - Segments is a non-empty list of dictionaries
     - Each segment has an 'id' field
     """
-
-    async def validate_async(self, data: Any) -> ValidationResult[Dict[str, Any]]:
-        """Asynchronously validate the input data structure.
-
-        Args:
-            data: The input data to validate
-
-        Returns:
-            ValidationResult with validation status and any errors
-        """
-        # Gọi phương thức validate đồng bộ
-        return self.validate(data)
 
     def validate(self, data: Any) -> ValidationResult[Dict[str, Any]]:
         """Synchronously validate the input data structure.
@@ -60,7 +48,6 @@ class BasicValidator(IValidator[Dict[str, Any]]):
             logger.critical(
                 "Unexpected error in BasicValidator: %s", str(e), exc_info=True
             )
-            result.add_error("An unexpected error occurred during validation")
 
         return result
 
@@ -69,11 +56,6 @@ class BasicValidator(IValidator[Dict[str, Any]]):
         if not isinstance(data, dict):
             result.add_error("Input data must be a dictionary")
             return
-
-        # Check required top-level fields
-        for field in ["title", "description", "segments"]:
-            if field not in data:
-                result.add_error(f"Missing required field: '{field}'")
 
         # Validate segments is a non-empty list
         if "segments" in data:

@@ -9,17 +9,17 @@ and combining with audio to produce final video segments.
 import asyncio
 import logging
 import os
-import subprocess
 import uuid
 from typing import Any, Dict, List
 
 from app.config import settings
 from app.core.exceptions import ProcessingError, VideoCreationError
+from app.interfaces.pipeline.context import IPipelineContext
 from app.services.processors.media.audio.processor import AudioProcessor
 from app.services.processors.core.base_processor import AsyncProcessor, ProcessingStage
 from app.services.processors.media.video.transition_processor import TransitionProcessor
 from app.services.processors.text.overlay import TextOverlayProcessor
-from utils.subprocess_utils import safe_subprocess_run
+from utils.subprocess_utils import safe_subprocess_run, SubprocessError
 from utils.image_utils import process_image
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,9 @@ class VideoProcessor(AsyncProcessor):
         Returns:
             List of dictionaries containing processing results
         """
-        context = kwargs.get("context", {})
+        context: IPipelineContext = kwargs.get("context", {})
         temp_dir = context.temp_dir
-        processed_segments = input_data or context.processed_segments
+        processed_segments = input_data
         if not processed_segments:
             raise ProcessingError("No segments found to process")
         clip_paths = []
@@ -86,7 +86,7 @@ class VideoProcessor(AsyncProcessor):
             return {
                 "id": segment_id,
                 "path": output_path,
-                "duration": self._get_duration(output_path),
+                # "duration": self._get_duration(output_path),
             }
 
         except Exception as e:
@@ -98,28 +98,6 @@ class VideoProcessor(AsyncProcessor):
                     metric, success=False, error_message=error_msg, items_processed=0
                 )
             raise ProcessingError(error_msg) from e
-
-    @staticmethod
-    def _get_duration(video_path: str) -> float:
-        """Get duration of a video file in seconds"""
-        try:
-            cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                video_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return float(result.stdout.strip())
-        except (subprocess.CalledProcessError, ValueError) as e:
-            logger.warning(
-                "Could not determine duration for %s: %s", video_path, str(e)
-            )
-            return 0.0
 
     async def _create_segment_clip_async(
         self, segment: Dict[str, Any], temp_dir: str, **_
@@ -148,31 +126,33 @@ class VideoProcessor(AsyncProcessor):
         Raises:
             VideoCreationError: If required resources are missing or processing fails.
         """
-        bg_image_obj = segment.get("image", {})
-        video_obj = segment.get("video", {})
-        bg_image_path = bg_image_obj.get("local_path")
-        video_path = video_obj.get("local_path")
+        bg_image_obj: Dict[str, Any] = segment.get("image", {})
+        video_obj: Dict[str, Any] = segment.get("video", {})
+        bg_image_path: str = bg_image_obj.get("local_path")
+        video_path: str = video_obj.get("local_path")
 
         # Ensure transition_in and transition_out are always dictionaries
-        transition_in = segment.get("transition_in") or {}
+        transition_in: Dict[str, Any] = segment.get("transition_in") or {}
         if not isinstance(transition_in, dict):
             logger.warning("transition_in is not a dictionary, using default values")
             transition_in = {}
 
-        transition_out = segment.get("transition_out") or {}
+        transition_out: Dict[str, Any] = segment.get("transition_out") or {}
         if not isinstance(transition_out, dict):
             logger.warning("transition_out is not a dictionary, using default values")
             transition_out = {}
 
-        segment_id = segment.get("id", str(uuid.uuid4()))
-        voice_over = segment.get("voice_over", {})
-        segment_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
+        segment_id: str = segment.get("id", str(uuid.uuid4()))
+        voice_over: Dict[str, Any] = segment.get("voice_over", {})
+        segment_output_path: str = os.path.join(
+            temp_dir, f"temp_segment_{segment_id}.mp4"
+        )
 
         if video_path and os.path.exists(video_path):
-            input_type = "video"
-            input_path = video_path
+            input_type: str = "video"
+            input_path: str = video_path
             try:
-                probe_cmd = [
+                probe_cmd: List[str] = [
                     "ffprobe",
                     "-v",
                     "quiet",
@@ -182,14 +162,16 @@ class VideoProcessor(AsyncProcessor):
                     "csv=p=0",
                     video_path,
                 ]
-                result = subprocess.run(
-                    probe_cmd, capture_output=True, text=True, check=True
+                result = safe_subprocess_run(
+                    probe_cmd,
+                    f"Get video duration for segment {segment_id}",
+                    logger,
                 )
                 duration_str = result.stdout.strip()
                 if not duration_str:
                     raise ValueError("Empty duration output from ffprobe")
                 original_duration = float(duration_str)
-            except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
+            except SubprocessError as e:
                 logger.warning(
                     "Could not get video duration for segment %s, "
                     "using default 4.0s. Error: %s\nCommand output: %s",
@@ -233,11 +215,13 @@ class VideoProcessor(AsyncProcessor):
                     "csv=p=0",
                     audio_path,
                 ]
-                result = subprocess.run(
-                    probe_cmd, capture_output=True, text=True, check=True
+                result = safe_subprocess_run(
+                    probe_cmd,
+                    f"Get audio duration for segment {segment_id}",
+                    logger,
                 )
                 original_duration = float(result.stdout.strip())
-            except subprocess.CalledProcessError as e:
+            except SubprocessError as e:
                 logger.warning(
                     "Could not get audio duration for segment %s: %s",
                     segment_id,

@@ -14,6 +14,7 @@ import logging
 import os
 import asyncio
 import boto3
+from app.interfaces.pipeline.context import IPipelineContext
 from app.services.processors.core.base_processor import (
     AsyncProcessor,
     ProcessingStage,
@@ -78,7 +79,7 @@ class S3UploadProcessor(AsyncProcessor):
 
         metric = self._start_processing(ProcessingStage.UPLOAD)
         video_path = input_data
-        context = kwargs["context"]  # Pipeline always provides context
+        context: IPipelineContext = kwargs.get("context")
         video_id = context.video_id
         bucket = settings.aws_s3_bucket
         region = settings.aws_s3_region
@@ -122,6 +123,7 @@ class S3UploadProcessor(AsyncProcessor):
 
             s3_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
             self._end_processing(metric, success=True, items_processed=1)
+            context.set("final_video_url", s3_url)
             self.logger.info("Video uploaded to S3: %s", s3_url)
             return s3_url
         except Exception as e:

@@ -13,18 +13,17 @@ from typing import List, Optional, Dict, Any
 
 from utils.subprocess_utils import safe_subprocess_run, SubprocessError
 
+
 class VideoProcessingError(SubprocessError):
     """Custom exception for video processing errors."""
+
 
 def ffmpeg_concat_videos(
     video_segments: List[Dict[str, str]],
     output_path: str,
     temp_dir: str,
-    transitions: Optional[list] = None,
     background_music: Optional[dict] = None,
     logger: Optional[Any] = None,
-    default_transition_type: str = "fade",
-    default_transition_duration: float = 1.0,
     bgm_volume: float = 0.2,
 ) -> None:
     """
@@ -93,114 +92,6 @@ def ffmpeg_concat_videos(
                 logger.warning(f"Failed to get mean volume for {audio_path}: {e}")
             return None
 
-    # Valid xfade transition types mapping
-    valid_transitions = {
-        "cut": "cut",  # Special case: no encoding needed
-        "fade": "fade",
-        "crossfade": "fade",  # Map crossfade to fade
-        "fadeblack": "fadeblack",
-        "fadewhite": "fadewhite",
-        "distance": "distance",
-        "wipeleft": "wipeleft",
-        "wiperight": "wiperight",
-        "wipeup": "wipeup",
-        "wipedown": "wipedown",
-        "slideleft": "slideleft",
-        "slideright": "slideright",
-        "slideup": "slideup",
-        "slidedown": "slidedown",
-        "smoothleft": "smoothleft",
-        "smoothright": "smoothright",
-        "smoothup": "smoothup",
-        "smoothdown": "smoothdown",
-        "circlecrop": "circlecrop",
-        "rectcrop": "rectcrop",
-        "circleopen": "circleopen",
-        "rectopen": "rectopen",
-    }
-
-    def normalize_transition_type(transition_type):
-        """Normalize and validate transition type for FFmpeg xfade filter"""
-        normalized = transition_type.lower().strip()
-        if normalized in valid_transitions:
-            return valid_transitions[normalized]
-        else:
-            if logger:
-                logger.warning(
-                    f"⚠️ Unknown transition type '{transition_type}', falling back to 'fade'"
-                )
-            return "fade"  # Safe fallback
-
-    def get_hardware_encoder():
-        """Detect and return best available hardware encoder"""
-        try:
-            # Test NVIDIA GPU
-            safe_subprocess_run(
-                [
-                    "ffmpeg",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "testsrc=duration=1:size=320x240:rate=1",
-                    "-c:v",
-                    "h264_nvenc",
-                    "-f",
-                    "null",
-                    "NUL" if os.name == "nt" else "/dev/null",
-                ],
-                "Test NVIDIA encoder",
-                None,
-            )
-            return "h264_nvenc"  # NVIDIA GPU
-        except (SubprocessError, OSError):
-            if logger:
-                logger.debug("NVIDIA encoder not available")
-            try:
-                # Test Intel Quick Sync
-                safe_subprocess_run(
-                    [
-                        "ffmpeg",
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        "testsrc=duration=1:size=320x240:rate=1",
-                        "-c:v",
-                        "h264_qsv",
-                        "-f",
-                        "null",
-                        "NUL" if os.name == "nt" else "/dev/null",
-                    ],
-                    "Test Intel QSV",
-                    None,
-                )
-                return "h264_qsv"  # Intel GPU
-            except (SubprocessError, OSError):
-                if logger:
-                    logger.debug("Intel encoder not available")
-                try:
-                    # Test AMD GPU
-                    safe_subprocess_run(
-                        [
-                            "ffmpeg",
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            "testsrc=duration=1:size=320x240:rate=1",
-                            "-c:v",
-                            "h264_amf",
-                            "-f",
-                            "null",
-                            "NUL" if os.name == "nt" else "/dev/null",
-                        ],
-                        "Test AMD encoder",
-                        None,
-                    )
-                    return "h264_amf"  # AMD GPU
-                except (SubprocessError, OSError):
-                    if logger:
-                        logger.debug("AMD encoder not available")
-                    return "libx264"  # CPU fallback
-
     def validate_inputs():
         """Validate input parameters"""
         if not video_segments:
@@ -238,213 +129,33 @@ def ffmpeg_concat_videos(
     validate_inputs()
 
     # 1. Concat segments
-    if not transitions:
-        # Nối thẳng không hiệu ứng bằng concat demuxer
-        concat_list_path = os.path.join(temp_dir, "concat_list.txt")
-        with open(concat_list_path, "w", encoding="utf-8") as f:
-            for seg in video_segments:
-                f.write(f"file '{os.path.abspath(seg['path'])}'\n")
-        temp_path = os.path.join(temp_dir, "concat_output.mp4")
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",
-            "-threads",
-            "1",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            concat_list_path,
-            "-c",
-            "copy",
-            temp_path,
-        ]
-        safe_subprocess_run(ffmpeg_cmd, "Concat without transition", logger)
-        if logger:
-            logger.info(f"Final video concat (no transition): {temp_path}")
-    else:
-        # Sử dụng thuật toán xử lý tuần tự:
-        # Bắt đầu với list các segment, xử lý từng transition một cách tuần tự
-        # Mỗi khi có transition, thay thế 2 segment liên tiếp bằng 1 file xfade
-
-        # Copy danh sách segments để xử lý, track both combined and original IDs
-        remaining_segments = [
-            {"id": seg["id"], "path": seg["path"], "last_original_id": seg["id"]}
-            for seg in video_segments
-        ]
-
-        if logger:
-            segment_count = len(video_segments)
-            transition_count = len(transitions) if transitions else 0
-            logger.info(
-                f"🎬 Processing {segment_count} segments with {transition_count} transitions"
-            )
-
-        # Xử lý từng transition theo thứ tự xuất hiện trong danh sách segments
-        transition_counter = 0
-        i = 0
-        while i < len(remaining_segments) - 1:
-            current_seg = remaining_segments[i]
-            next_seg = remaining_segments[i + 1]
-
-            # Tìm transition cho cặp sử dụng last_original_id của current và original id của next
-            transition = None
-            if transitions:
-                for t in transitions:
-                    # So sánh last_original_id của current_seg với original id của next_seg
-                    if (
-                        t.get("from_segment") == current_seg["last_original_id"]
-                        and t.get("to_segment") == next_seg["id"]
-                    ):
-                        transition = t
-                        if logger:
-                            from_seg = t.get('from_segment')
-                            to_seg = t.get('to_segment')
-                            trans_type = t.get('type', 'fade')
-                            logger.info(
-                                f"✅ Found transition: {from_seg} → {to_seg} ({trans_type})"
-                            )
-                        break
-
-            if not transition:
-                # Không có transition cho cặp này, chuyển sang cặp tiếp theo
-                if logger:
-                    logger.info(
-                        f"� No transition between {current_seg['id']} and {next_seg['id']}"
-                    )
-                i += 1
-                continue
-
-            # Có transition - kiểm tra xem có phải cut transition không
-            transition_counter += 1
-            t_type = (
-                normalize_transition_type(transition.get("type"))
-                if transition and transition.get("type")
-                else normalize_transition_type(default_transition_type)
-            )
-            t_duration = (
-                float(transition.get("duration", default_transition_duration))
-                if transition
-                else default_transition_duration
-            )
-
-            if t_type == "cut":
-                # Cut transition: Không cần encode, chỉ nối trực tiếp
-                if logger:
-                    logger.info(
-                        f"⚡ Cut transition {transition_counter}: No encoding needed"
-                    )
-                # Giữ nguyên 2 segments, không tạo xfade file
-                i += 1
-                continue
-
-            # Visual transition: Cần encode
-            dur1 = get_duration(current_seg["path"])
-            offset = dur1 - t_duration
-            if logger:
-                log_msg = f"🔄 Transition {transition_counter}: {t_type}"
-                log_msg += f" (duration: {t_duration}s)"
-                logger.info(log_msg)
-            if offset < 0:
-                if logger:
-                    warn_msg = "⚠️ NEGATIVE OFFSET! This will cause timing issues. "
-                    warn_msg += f"dur1={dur1}s < t_duration={t_duration}s"
-                    logger.warning(warn_msg)
-
-            temp_out = os.path.join(temp_dir, f"xfade_{transition_counter}.mp4")
-
-            # Use hardware encoder if available for better performance
-            encoder = get_hardware_encoder()
-            encode_settings = []
-            if encoder == "libx264":
-                # CPU encoding - optimize for speed
-                encode_settings = ["-preset", "ultrafast", "-tune", "fastdecode"]
-            elif encoder in ["h264_nvenc", "h264_qsv", "h264_amf"]:
-                # GPU encoding - use high performance preset
-                encode_settings = ["-preset", "p1"]  # Fastest preset for NVENC
-
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",
-                "-threads",
-                "0",  # Use all CPU cores
-                "-i",
-                current_seg["path"],
-                "-i",
-                next_seg["path"],
-                "-filter_complex",
-                f"[0:v][1:v]xfade=transition={t_type}:duration={t_duration}:offset={offset}[v];"
-                f"[0:a][1:a]acrossfade=d={t_duration}[a]",
-                "-map",
-                "[v]",
-                "-map",
-                "[a]",
-                "-c:v",
-                encoder,
-                *encode_settings,
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                temp_out,
-            ]
-            safe_subprocess_run(
-                ffmpeg_cmd, f"Video transition {transition_counter} ({t_type})", logger
-            )
-
-            # Thay thế 2 segment bằng 1 file transition
-            # Giữ lại last_original_id của segment thứ hai để tiếp tục tìm transitions
-            new_segment = {
-                "id": f"{current_seg['id']}+{next_seg['id']}",
-                "path": temp_out,
-                "last_original_id": next_seg["id"],
-            }
-            remaining_segments[i : i + 2] = [new_segment]  # Thay thế 2 segment bằng 1
-            if logger:
-                logger.info(f"📁 Created transition file: {temp_out}")
-
-            # Tiếp tục từ vị trí hiện tại (không tăng i vì list đã thay đổi)
-
-        # Lấy danh sách đường dẫn file cuối cùng
-        final_segments = [seg["path"] for seg in remaining_segments]
-
-        # Luôn dùng concat demuxer để nối các đoạn lại đúng thứ tự
-        concat_list_path = os.path.join(temp_dir, "concat_list.txt")
-        with open(concat_list_path, "w", encoding="utf-8") as f:
-            for seg_path in final_segments:
-                f.write(f"file '{os.path.abspath(seg_path)}'\n")
-
-        if logger:
-            logger.info(f"📄 Created concat_list.txt with {len(final_segments)} files")
-
-        temp_path = os.path.join(temp_dir, "concat_output.mp4")
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",
-            "-threads",
-            "1",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            concat_list_path,
-            "-c",
-            "copy",
-            temp_path,
-        ]
-        safe_subprocess_run(
-            ffmpeg_cmd, "Concat all segments in order (mixed transitions)", logger
-        )
-        if logger:
-            logger.info(
-                f"Final video concat (mixed, all segments in order): {temp_path}"
-            )
+    concat_list_path = os.path.join(temp_dir, "concat_list.txt")
+    with open(concat_list_path, "w", encoding="utf-8") as f:
+        for seg in video_segments:
+            f.write(f"file '{os.path.abspath(seg['path'])}'\n")
+    temp_path = os.path.join(temp_dir, "concat_output.mp4")
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-y",
+        "-threads",
+        "1",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concat_list_path,
+        "-c",
+        "copy",
+        temp_path,
+    ]
+    safe_subprocess_run(ffmpeg_cmd, "Concat without transition", logger)
+    if logger:
+        logger.info(f"Final video concat: {temp_path}")
 
     # 2. Overlay background music if provided
     if background_music and background_music.get("local_path"):
-        bgm_path = background_music["local_path"]
+        bgm_path = background_music.get("local_path")
         start_delay = float(background_music.get("start_delay", 0) or 0)
         video_duration = get_duration(temp_path)
         # Auto adjust bgm volume based on mean_volume
@@ -456,7 +167,9 @@ def ffmpeg_concat_videos(
                 bgm_volume_factor = 10 ** (diff_db / 20)
                 bgm_volume_factor = max(0.1, min(bgm_volume_factor, 0.5))
                 if logger:
-                    log_msg = f"🔊 Auto-adjusted bgm volume factor: {bgm_volume_factor:.2f}"
+                    log_msg = (
+                        f"🔊 Auto-adjusted bgm volume factor: {bgm_volume_factor:.2f}"
+                    )
                     log_msg += f" (video_mean={video_mean_volume}dB, "
                     log_msg += f"music_mean={music_mean_volume}dB)"
                     logger.info(log_msg)
@@ -473,18 +186,47 @@ def ffmpeg_concat_videos(
                     f"⚠️ Error auto-adjusting bgm volume: {e}, using default 0.2"
                 )
         # Prepare filter for bgm: delay, trim, volume
-        bgm_play_duration = max(0, video_duration - start_delay)
+        # Calculate actual BGM play duration considering both start_delay and end_delay
+        end_delay = float(background_music.get("end_delay", 0) or 0)
+        bgm_start_time = start_delay
+        bgm_end_time = max(0, video_duration - end_delay)
+        bgm_play_duration = max(0, bgm_end_time - bgm_start_time)
+        
+        if logger:
+            logger.info(
+                f"🎵 BGM timing: video_duration={video_duration:.2f}s, "
+                f"start_delay={start_delay:.2f}s, end_delay={end_delay:.2f}s, "
+                f"bgm_play_duration={bgm_play_duration:.2f}s"
+            )
+        
+        # Safety check: if BGM duration is too small or invalid, skip BGM processing
+        if bgm_play_duration <= 0.1:  # Less than 100ms
+            if logger:
+                logger.warning(
+                    f"⚠️ BGM play duration too short ({bgm_play_duration:.2f}s), "
+                    "skipping background music"
+                )
+            # Copy temp_path to output without BGM processing
+            if os.path.exists(output_path):
+                raise VideoProcessingError(f"Output file already exists: {output_path}")
+            shutil.copy2(temp_path, output_path)
+            return
+        
         filter_parts = []
         if start_delay > 0:
             delay_ms = int(start_delay * 1000)
             filter_parts.append(f"adelay={delay_ms}|{delay_ms}")
-        filter_parts.append(f"atrim=duration={bgm_play_duration}")
+        
+        # Only trim if we have a valid duration to trim to
+        if bgm_play_duration > 0:
+            filter_parts.append(f"atrim=duration={bgm_play_duration}")
         filter_parts.append(f"volume={bgm_volume_factor}")
         bgm_filter = ",".join(filter_parts)
         # Compose filter_complex for direct mix
+        # Use 'shortest' duration to prevent silence at the end
         filter_complex = (
             f"[1:a]{bgm_filter}[bgm]; "
-            f"[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            f"[0:a][bgm]amix=inputs=2:duration=shortest:dropout_transition=2[aout]"
         )
         temp_final_with_bgm = os.path.join(temp_dir, "final_with_bgm.mp4")
         ffmpeg_mix_cmd = [

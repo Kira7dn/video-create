@@ -111,46 +111,74 @@ class TranscriptProcessor(AsyncProcessor):
                         if item in success_words:
                             word_index = success_words.index(item) + 1
                             break
+                    self.logger.debug("Exact match found for line %d: %s", line_idx, line)
                     continue
 
+            # Flexible matching with relaxed requirements
             group = self._find_flexible_match(
                 line_normalized,
                 success_words[word_index:],
                 alignment_issues,
-                max_lookahead=20,
+                max_lookahead=30,  # Increased lookahead
             )
 
-            if group and len(group) == len(line_normalized):
+            # Accept partial matches (at least 50% of words found)
+            min_required_words = max(1, len(line_normalized) // 2)
+            if group and len(group) >= min_required_words:
                 text_over_item = create_text_over_item(line, group)
                 if text_over_item:
                     text_over.append(text_over_item)
-                    for item in reversed(group):
-                        if item in success_words:
-                            word_index = success_words.index(item) + 1
-                            break
-                    continue
-                self.logger.debug(
-                    "Cannot find exact match, flexible matched for line %d",
-                    line_idx,
-                )
-            else:
-                self.logger.warning(
-                    "Cannot find enough words for line %d: %s (only found %d/%d words)",
-                    line_idx,
-                    line,
-                    len(group) if group else 0,
-                    len(line_normalized),
-                )
-
-                if not group and text_over:
-                    last_end = text_over[-1]["start_time"] + text_over[-1]["duration"]
-                    text_over.append(
-                        {
-                            "text": line,
-                            "start_time": last_end,
-                            "duration": 1.0,  # Mặc định 1 giây
-                        }
+                    # Advance word index more conservatively
+                    if len(group) == len(line_normalized):
+                        # Full match - advance past all words
+                        for item in reversed(group):
+                            if item in success_words:
+                                word_index = success_words.index(item) + 1
+                                break
+                    else:
+                        # Partial match - advance more carefully
+                        word_index += len(group) // 2
+                    self.logger.debug(
+                        "Flexible match found for line %d: %s (%d/%d words)",
+                        line_idx, line, len(group), len(line_normalized)
                     )
+                    continue
+
+            # Improved fallback logic - always try to include the text
+            self.logger.warning(
+                "Limited match for line %d: %s (found %d/%d words) - using fallback",
+                line_idx,
+                line,
+                len(group) if group else 0,
+                len(line_normalized),
+            )
+
+            # Calculate fallback timing
+            if text_over:
+                # Base on previous text timing
+                last_end = text_over[-1]["start_time"] + text_over[-1]["duration"]
+                fallback_start = last_end
+            elif group:
+                # Use timing from partial match if available
+                fallback_start = min(w["start"] for w in group if "start" in w)
+            else:
+                # Use current word index position if available
+                if word_index < len(success_words):
+                    fallback_start = success_words[word_index].get("start", word_index * 1.0)
+                else:
+                    fallback_start = len(text_over) * 2.0  # Estimate based on position
+
+            # Add fallback text_over item
+            fallback_duration = max(1.0, len(line.split()) * 0.3)  # ~300ms per word
+            text_over.append({
+                "text": line,
+                "start_time": fallback_start,
+                "duration": fallback_duration,
+                "is_fallback": True  # Mark as fallback for debugging
+            })
+            
+            # Advance word index slightly to avoid getting stuck
+            word_index += max(1, len(group) if group else 1)
 
         self.logger.info(
             "Đã tạo được %d text_over items từ %d dòng",
@@ -288,7 +316,25 @@ class TranscriptProcessor(AsyncProcessor):
                         str(e),
                         exc_info=True,
                     )
-                    continue
+                    # Fallback: use simple split to preserve content
+                    self.logger.warning(
+                        "Segment %s: Sử dụng fallback để phân đoạn transcript",
+                        segment_id
+                    )
+                    try:
+                        from utils.text_utils import _fallback_split
+                        transcript_lines = _fallback_split(transcript_content)
+                        if not transcript_lines:
+                            # Last resort: use entire content as single segment
+                            transcript_lines = [transcript_content]
+                    except Exception as fallback_error:
+                        self.logger.error(
+                            "Segment %s: Fallback split cũng thất bại - %s",
+                            segment_id,
+                            str(fallback_error)
+                        )
+                        # Absolute last resort: use entire content
+                        transcript_lines = [transcript_content]
 
                 try:
                     with tempfile.NamedTemporaryFile(

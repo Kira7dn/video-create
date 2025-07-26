@@ -154,6 +154,7 @@ class VideoPipeline(IPipeline):
         Raises:
             ProcessingError: If any stage fails during execution
         """
+
         start_time = time.time()
         results = {
             "success": False,
@@ -180,7 +181,7 @@ class VideoPipeline(IPipeline):
                 try:
                     # Execute the stage
                     self.logger.info("Executing stage: %s", stage.name)
-                    await stage.execute(context)
+                    context = await stage.execute(context)
 
                     # Record successful execution
                     stage_result["status"] = stage.status.value
@@ -206,19 +207,16 @@ class VideoPipeline(IPipeline):
                     results["duration"] = time.time() - start_time
                     results["success"] = False
 
-                    # Collect metrics for failed pipeline
-                    self._collect_metrics(results)
                     raise ProcessingError(error_msg) from e
 
             # Record successful pipeline execution
+            results["context"] = context
             results["duration"] = time.time() - start_time
             results["success"] = True
             self.logger.info(
                 "Pipeline completed successfully in %.2f seconds", results["duration"]
             )
 
-            # Collect metrics for successful pipeline
-            self._collect_metrics(results)
             return results
 
         except Exception as e:
@@ -233,9 +231,6 @@ class VideoPipeline(IPipeline):
                 str(e),
                 exc_info=True,
             )
-
-            # Collect metrics for failed pipeline
-            self._collect_metrics(results)
             raise
 
     def get_stage_summary(self) -> List[Dict[str, Any]]:
@@ -255,42 +250,3 @@ class VideoPipeline(IPipeline):
             }
             for stage in self._stages
         ]
-
-    def _collect_metrics(self, results: Dict[str, Any]) -> None:
-        """
-        Collect metrics for the pipeline execution.
-
-        Args:
-            results: Pipeline execution results
-        """
-        try:
-            # Record pipeline execution metrics
-            self.metrics_collector.record_metric(
-                "pipeline_execution_time_seconds",
-                results["duration"],
-                {"success": str(results["success"]).lower()},
-            )
-
-            # Record stage metrics
-            for stage_result in results.get("stages", []):
-                self.metrics_collector.record_metric(
-                    "stage_execution_time_seconds",
-                    stage_result.get("duration", 0.0),
-                    {
-                        "stage": stage_result.get("name", "unknown"),
-                        "status": stage_result.get("status", "unknown"),
-                    },
-                )
-
-        except (KeyError, AttributeError, ValueError) as e:
-            # Log specific errors that could occur during metrics collection
-            self.logger.error(
-                "Failed to collect pipeline metrics: %s", str(e), exc_info=True
-            )
-        except Exception as e:  # pylint: disable=broad-except
-            # Catch any other unexpected errors to prevent pipeline failure
-            self.logger.critical(
-                "Unexpected error while collecting pipeline metrics: %s",
-                str(e),
-                exc_info=True,
-            )

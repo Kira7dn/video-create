@@ -28,7 +28,8 @@
               "url": { "type": "string" },
               "content": { "type": "string" },
               "start_delay": { "type": "number" },
-              "end_delay": { "type": "number" }
+              "end_delay": { "type": "number" },
+              "local_path": { "type": "string" }
             },
             "required": ["url"]
           },
@@ -37,7 +38,8 @@
             "properties": {
               "url": { "type": "string" },
               "start_delay": { "type": "number" },
-              "end_delay": { "type": "number" }
+              "end_delay": { "type": "number" },
+              "local_path": { "type": "string" }
             },
             "required": ["url"]
           },
@@ -46,7 +48,8 @@
             "properties": {
               "url": { "type": "string" },
               "start_delay": { "type": "number" },
-              "end_delay": { "type": "number" }
+              "end_delay": { "type": "number" },
+              "local_path": { "type": "string" }
             },
             "required": ["url"]
           },
@@ -92,7 +95,8 @@
         "start_delay": { "type": "number" },
         "end_delay": { "type": "number" },
         "fade_in": { "type": "number" },
-        "fade_out": { "type": "number" }
+        "fade_out": { "type": "number" },
+        "local_path": { "type": "string" }
       },
       "required": ["url"]
     }

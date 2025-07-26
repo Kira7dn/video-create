@@ -52,6 +52,7 @@ class DownloadProcessor(AsyncProcessor):
         # Prepare tasks for all downloads
         download_tasks = []
         results = []
+        result_background_music = {}
 
         # Add segment downloads - Preserve original structure, add local_path to assets
         for i, segment in enumerate(segments):
@@ -76,8 +77,9 @@ class DownloadProcessor(AsyncProcessor):
                     asset_data = segment[asset_type]
                     asset_url = asset_data["url"]
 
-                    # Generate destination path
-                    dest_filename = f"{segment_id}_{prefix}_{Path(asset_url).name}"
+                    # Generate destination path - remove query parameters from URL
+                    clean_url = asset_url.split('?')[0]  # Remove query parameters
+                    dest_filename = f"{segment_id}_{prefix}_{Path(clean_url).name}"
                     dest_path = str(Path(temp_dir) / dest_filename)
 
                     # Add download task
@@ -97,44 +99,60 @@ class DownloadProcessor(AsyncProcessor):
             # Always add segment to results (preserve structure even if no assets)
             results.append(result_segment)
 
-        # Add background music download
-        if not isinstance(background_music, dict) or "url" not in background_music:
-            raise DownloadError("background_music must be an object with 'url' field")
+        # Handle background music if provided
+        if background_music is not None:
+            if not isinstance(background_music, dict) or "url" not in background_music:
+                raise DownloadError("background_music must be an object with 'url' field")
 
-        bg_dest_path = str(
-            Path(temp_dir) / f"bg_music_{Path(background_music['url']).name}"
-        )
-        download_tasks.append(
-            self._download_asset(
-                url=background_music["url"],
-                dest_path=bg_dest_path,
-                asset_type="background_music",
-                segment_id="bg_music",
+            # Clean up the background music URL by removing query parameters
+            bg_url = background_music['url'].split('?')[0]
+            bg_dest_path = str(
+                Path(temp_dir) / f"bg_music_{Path(bg_url).name}"
             )
-        )
-        result_background_music["local_path"] = bg_dest_path
+            download_tasks.append(
+                self._download_asset(
+                    url=background_music["url"],
+                    dest_path=bg_dest_path,
+                    asset_type="background_music",
+                    segment_id="bg_music",
+                )
+            )
+            result_background_music = background_music.copy()
+            result_background_music["local_path"] = bg_dest_path
 
-        # Store background music info in context
-        context.set("background_music", result_background_music)
+            # Store background music info in context
+            context.set("background_music", result_background_music)
+        else:
+            # If no background music, set it to None in the context
+            context.set("background_music", None)
 
         # Execute all downloads concurrently
-        download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
+        download_results = await asyncio.gather(*download_tasks, return_exceptions=False)
 
-        # Check for any failed downloads
-        failed_downloads = [
-            r
-            for r in download_results
-            if isinstance(r, Exception)
-            or (isinstance(r, dict) and not r.get("success"))
-        ]
+        # Process results and collect errors
+        failed_downloads = []
+        for result in download_results:
+            if isinstance(result, dict) and not result.get("success", True):
+                failed_downloads.append(result)
+            elif isinstance(result, Exception):
+                failed_downloads.append({"error": str(result)})
 
         if failed_downloads:
-            error_details = "\n".join(
-                str(error) for error in failed_downloads[:5]  # Limit error details
-            )
-            raise DownloadError(
-                f"Failed to download {len(failed_downloads)} assets. First few errors:\n{error_details}"
-            )
+            # Format error details
+            error_details = []
+            for error in failed_downloads[:5]:  # Limit to first 5 errors
+                if isinstance(error, dict):
+                    error_msg = error.get("error", "Unknown error")
+                    asset_type = error.get("asset_type", "unknown")
+                    segment_id = error.get("segment_id", "unknown")
+                    url = error.get("url", "unknown")
+                    error_details.append(f"{asset_type} for segment {segment_id} ({url}): {error_msg}")
+                else:
+                    error_details.append(str(error))
+            
+            error_message = f"Failed to download {len(failed_downloads)} assets. First few errors:\n"
+            error_message += "\n".join(error_details)
+            raise DownloadError(error_message)
 
         return results
 
@@ -143,7 +161,14 @@ class DownloadProcessor(AsyncProcessor):
     ) -> Dict[str, Any]:
         """Helper method to download a single asset"""
         try:
+            if not url or not isinstance(url, str):
+                raise ValueError(f"Invalid URL: {url}")
+                
             file_path = await download_file(url, destination=dest_path, overwrite=True)
+            
+            if not file_path or not Path(file_path).exists():
+                raise FileNotFoundError(f"Downloaded file not found at {file_path}")
+                
             self.logger.debug(
                 "Downloaded %s asset from %s to %s", asset_type, url, file_path
             )
@@ -153,13 +178,26 @@ class DownloadProcessor(AsyncProcessor):
             error_msg = f"Failed to download {asset_type} from {url}: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
 
-            if hasattr(self, "metrics_collector"):
-                await self.metrics_collector.increment_counter(
-                    "asset_download_failed",
-                    tags={
-                        "asset_type": asset_type,
-                        "error": str(e)[:100],
-                        "segment_id": segment_id,
-                    },
-                )
-            raise
+            if hasattr(self, "metrics_collector") and self.metrics_collector is not None:
+                try:
+                    await self.metrics_collector.increment_counter("asset_download_failed")
+                except Exception as metrics_error:
+                    self.logger.error(
+                        "Failed to record metrics: %s", str(metrics_error), exc_info=True
+                    )
+                
+            # Log additional context
+            self.logger.warning(
+                "Failed to download %s for segment %s: %s",
+                asset_type,
+                segment_id,
+                str(e)[:100]
+            )
+            # Return a dict with error information instead of raising
+            return {
+                "success": False,
+                "error": str(e),
+                "asset_type": asset_type,
+                "segment_id": segment_id,
+                "url": url
+            }

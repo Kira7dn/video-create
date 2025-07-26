@@ -55,7 +55,7 @@ def find_flexible_match(
     max_lookahead: int = 20,
 ) -> List[Dict]:
     """
-    Tìm kiếm mềm dẻo các từ không theo thứ tự.
+    Tìm kiếm mềm dẻo các từ không theo thứ tự với khả năng tìm từ tương tự.
 
     Args:
         words: Danh sách từ cần tìm
@@ -64,17 +64,19 @@ def find_flexible_match(
         max_lookahead: Số từ tối đa để xem xét phía trước
 
     Returns:
-        List[Dict]: Danh sách các từ tìm thấy
+        List[Dict]: Danh sách các từ tìm thấy (có thể là partial match)
     """
     if not words or not word_items:
         return []
 
     found_items = []
     remaining_words = set(word.lower() for word in words)
+    original_remaining = remaining_words.copy()
 
     # Giới hạn phạm vi tìm kiếm
     search_items = word_items[:max_lookahead]
 
+    # Phase 1: Exact matching
     for item in search_items:
         item_word = item.get("word", "").lower()
         if item_word in remaining_words:
@@ -84,15 +86,81 @@ def find_flexible_match(
             if not remaining_words:
                 break
 
-    # Ghi nhận các từ không tìm thấy
-    if remaining_words:
+    # Phase 2: Fuzzy matching for remaining words
+    if remaining_words and len(found_items) < len(original_remaining):
+        for item in search_items:
+            if item in found_items:  # Skip already matched items
+                continue
+                
+            item_word = item.get("word", "").lower()
+            
+            # Try fuzzy matching
+            for word in list(remaining_words):
+                # Check if words are similar (contain each other or share significant portion)
+                if (
+                    len(word) >= 3 and len(item_word) >= 3 and
+                    (word in item_word or item_word in word or
+                     _calculate_similarity(word, item_word) > 0.6)
+                ):
+                    found_items.append(item)
+                    remaining_words.remove(word)
+                    alignment_logger.debug(
+                        "Fuzzy match: '%s' matched with '%s'", word, item_word
+                    )
+                    break
+
+            if not remaining_words:
+                break
+
+    # Phase 3: Position-based matching for very short words
+    if remaining_words and len(found_items) > 0:
+        # For remaining short words, try to find them near already found words
+        for word in list(remaining_words):
+            if len(word) <= 2:  # Very short words
+                # Look for items near our found items
+                for item in search_items:
+                    if item not in found_items:
+                        item_word = item.get("word", "").lower()
+                        if len(item_word) <= 3 and word[0] == item_word[0]:  # First letter match
+                            found_items.append(item)
+                            remaining_words.remove(word)
+                            alignment_logger.debug(
+                                "Position match: '%s' matched with '%s'", word, item_word
+                            )
+                            break
+
+    # Sort found items by their original position in word_items
+    found_items.sort(key=lambda x: word_items.index(x) if x in word_items else 0)
+
+    # Log missing words only if we found less than 30% of the words
+    if remaining_words and len(found_items) < len(original_remaining) * 0.3:
         issue = {
             "missing_words": list(remaining_words),
-            "context": f"Không tìm thấy từ trong {len(search_items)} từ đầu tiên",
+            "found_words": len(found_items),
+            "total_words": len(original_remaining),
+            "context": f"Tìm thấy {len(found_items)}/{len(original_remaining)} từ trong {len(search_items)} từ",
         }
         alignment_issues.append(issue)
         alignment_logger.warning(
-            "Không tìm thấy các từ: %s", ", ".join(remaining_words)
+            "Chỉ tìm thấy %d/%d từ. Thiếu: %s", 
+            len(found_items), len(original_remaining), ", ".join(remaining_words)
         )
 
     return found_items
+
+
+def _calculate_similarity(word1: str, word2: str) -> float:
+    """
+    Tính độ tương tự giữa hai từ dựa trên số ký tự chung.
+    
+    Returns:
+        float: Giá trị từ 0.0 đến 1.0
+    """
+    if not word1 or not word2:
+        return 0.0
+    
+    # Count common characters
+    common_chars = sum(1 for c in word1 if c in word2)
+    max_len = max(len(word1), len(word2))
+    
+    return common_chars / max_len if max_len > 0 else 0.0

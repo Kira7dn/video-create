@@ -35,7 +35,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "image_auto",
-            "processor_class": "app.services.processors.media.image.processor.ImageProcessor",
+            "processor_class": "app.services.processors.media.ImageProcessor",
             "input_key": "download_results",
             "output_key": "processed_segments",
             "required_inputs": ["download_results"],
@@ -44,7 +44,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "transcript_alignment",
-            "processor_class": "app.services.processors.media.text.transcript.TranscriptProcessor",
+            "processor_class": "app.services.processors.text.TranscriptProcessor",
             "input_key": "processed_segments",
             "output_key": "processed_segments",
             "required_inputs": ["processed_segments"],
@@ -53,7 +53,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "create_segment_clips",
-            "processor_class": "app.services.processors.media.video.video_processor.VideoProcessor",
+            "processor_class": "app.services.processors.media.VideoProcessor",
             "input_key": "processed_segments",
             "output_key": "segment_clips",
             "required_inputs": ["processed_segments"],
@@ -62,7 +62,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "concatenate_video",
-            "processor_class": "app.services.processors.concatenation_processor.ConcatenationProcessor",
+            "processor_class": "app.services.processors.media.ConcatenationProcessor",
             "input_key": "segment_clips",
             "output_key": "final_video_path",
             "required_inputs": ["segment_clips", "transitions", "background_music"],
@@ -71,7 +71,7 @@ def get_video_creation_stages() -> List[Dict[str, Any]]:
         {
             "type": "processor",
             "name": "upload",
-            "processor_class": "app.services.processors.s3_upload_processor.S3UploadProcessor",
+            "processor_class": "app.services.processors.io.S3UploadProcessor",
             "input_key": "final_video_path",
             "output_key": "s3_upload_result",
         },
